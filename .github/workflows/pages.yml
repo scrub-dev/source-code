@@ -33,12 +33,21 @@ jobs:
         run: |
           pip install -r website/requirements.txt
           python website/build.py
+      # Always available: a downloadable static-site bundle (host it anywhere).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scrub-site
+          path: website/dist
+      # For GitHub Pages deploy (only consumed when the deploy job runs).
       - uses: actions/upload-pages-artifact@v3
         with:
           path: website/dist
 
+  # Deploys to GitHub Pages. Requires Pages (public repo or a plan that includes it)
+  # with Source = GitHub Actions; then set repository variable ENABLE_PAGES=true.
   deploy:
     needs: build
+    if: vars.ENABLE_PAGES == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
