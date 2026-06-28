@@ -1,0 +1,32 @@
+SCRUB is deployed as a {{ ternary "StatefulSet (HA)" "Deployment" .Values.ha.enabled }} with {{ .Values.replicaCount }} replica(s).
+
+Reach it in-cluster at:
+  http://{{ include "scrub.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+
+Point your app's base URL at a route, e.g.:
+  http://{{ include "scrub.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/openai/v1/chat/completions
+
+Health:  /healthz   |   Masking mode: {{ .Values.config.masking.mode | default "enforce" }}
+
+{{- if .Values.ha.enabled }}
+
+HA: each pod receives a distinct node id from its ordinal (SCRUB_NODE_ID), and
+shares session state via Redis.
+{{- if not .Values.redis.url }}
+
+  ⚠  redis.url is empty — set it to your Redis (rediss://… recommended), e.g.
+     --set redis.url=rediss://scrub:pass@redis-master:6379/0
+{{- end }}
+{{- if not (include "scrub.hasEncryptionKey" .) }}
+
+  ⚠  No at-rest key set — session vaults in Redis are UNENCRYPTED. Set one with
+     --set sessions.encryptionKey=<high-entropy secret>   (or sessions.existingSecret)
+{{- end }}
+{{- if ne (.Values.config.masking.scope | default "request") "session" }}
+
+  ℹ  config.masking.scope is "{{ .Values.config.masking.scope | default "request" }}". HA session
+     sharing only matters for scope: session — set it for stable cross-turn pseudonyms.
+{{- end }}
+{{- end }}
+
+Run the smoke test:  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}

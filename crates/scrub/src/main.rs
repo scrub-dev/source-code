@@ -54,13 +54,17 @@ async fn main() -> Result<()> {
 
     let config_path = PathBuf::from(config_path);
     // Off the async runtime: secret sources (e.g. Vault) may do blocking I/O.
-    let (cfg, compiled) = {
+    let (mut cfg, compiled) = {
         let cp = config_path.clone();
         tokio::task::spawn_blocking(move || reload::load(&cp))
             .await
             .context("config load task panicked")?
             .with_context(|| format!("compiling config {}", config_path.display()))?
     };
+    // 12-factor overrides for cluster/session settings. Lets a Kubernetes
+    // StatefulSet feed each pod a distinct node id (from its ordinal) and inject
+    // the Redis URL + at-rest key from a Secret, without templating the config.
+    apply_session_env_overrides(&mut cfg.sessions, |k| std::env::var(k).ok());
     let handle = Arc::new(ArcSwap::from_pointee(compiled));
 
     let ttl = session::parse_duration(cfg.masking.ttl.as_deref(), DEFAULT_TTL);
@@ -283,6 +287,40 @@ fn random_node_id() -> u16 {
     u16::from_le_bytes(b) & 0x0fff
 }
 
+/// Apply environment overrides to the session/cluster config. `get` resolves an
+/// env var (injected for testability). Recognized:
+/// `SCRUB_SESSION_BACKEND` (memory|redis), `SCRUB_REDIS_URL`,
+/// `SCRUB_ENCRYPTION_KEY`, `SCRUB_NODE_ID` (0..4095).
+fn apply_session_env_overrides(
+    s: &mut scrub_core::config::Sessions,
+    get: impl Fn(&str) -> Option<String>,
+) {
+    if let Some(v) = get("SCRUB_SESSION_BACKEND") {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "redis" => s.backend = SessionBackendKind::Redis,
+            "memory" => s.backend = SessionBackendKind::Memory,
+            "" => {}
+            other => tracing::warn!(value = %other, "ignoring unknown SCRUB_SESSION_BACKEND"),
+        }
+    }
+    if let Some(v) = get("SCRUB_REDIS_URL").filter(|v| !v.is_empty()) {
+        s.redis_url = Some(v);
+    }
+    if let Some(v) = get("SCRUB_ENCRYPTION_KEY").filter(|v| !v.is_empty()) {
+        s.encryption_key = Some(v);
+    }
+    if let Some(v) = get("SCRUB_NODE_ID").filter(|v| !v.is_empty()) {
+        match v.trim().parse::<u16>() {
+            Ok(n) if n <= 0x0fff => s.node_id = Some(n),
+            Ok(n) => tracing::warn!(
+                value = n,
+                "ignoring SCRUB_NODE_ID out of range (want 0..4095)"
+            ),
+            Err(_) => tracing::warn!(value = %v, "ignoring invalid SCRUB_NODE_ID"),
+        }
+    }
+}
+
 /// Read a `--flag value` pair from args.
 fn flag(args: &[String], name: &str) -> Option<String> {
     args.iter()
@@ -310,4 +348,48 @@ fn spawn_session_sweeper(sessions: Arc<dyn SessionBackend>, ttl: Duration) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scrub_core::config::{SessionBackendKind, Sessions};
+    use std::collections::HashMap;
+
+    #[test]
+    fn session_env_overrides_apply() {
+        let env: HashMap<&str, &str> = [
+            ("SCRUB_SESSION_BACKEND", "redis"),
+            ("SCRUB_REDIS_URL", "rediss://r:6379/"),
+            ("SCRUB_ENCRYPTION_KEY", "s3cret"),
+            ("SCRUB_NODE_ID", "7"),
+        ]
+        .into_iter()
+        .collect();
+        let mut s = Sessions::default();
+        apply_session_env_overrides(&mut s, |k| env.get(k).map(|v| v.to_string()));
+        assert!(matches!(s.backend, SessionBackendKind::Redis));
+        assert_eq!(s.redis_url.as_deref(), Some("rediss://r:6379/"));
+        assert_eq!(s.encryption_key.as_deref(), Some("s3cret"));
+        assert_eq!(s.node_id, Some(7));
+    }
+
+    #[test]
+    fn session_env_overrides_reject_bad_node_id() {
+        let mut s = Sessions::default();
+        apply_session_env_overrides(&mut s, |k| {
+            (k == "SCRUB_NODE_ID").then(|| "99999".to_string())
+        });
+        assert_eq!(s.node_id, None); // out of 12-bit range, ignored
+    }
+
+    #[test]
+    fn session_env_overrides_noop_when_unset() {
+        let mut s = Sessions {
+            node_id: Some(3),
+            ..Default::default()
+        };
+        apply_session_env_overrides(&mut s, |_| None);
+        assert_eq!(s.node_id, Some(3));
+    }
 }

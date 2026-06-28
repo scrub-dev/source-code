@@ -1,0 +1,139 @@
+# Default values for the SCRUB chart.
+
+image:
+  repository: ghcr.io/scrub-dev/scrub
+  # Defaults to the chart's appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Number of replicas (single-node by default). For HA, set ha.enabled=true and
+# raise this; each pod then gets a distinct node id from its ordinal.
+replicaCount: 1
+
+# ---------------------------------------------------------------------------
+# SCRUB configuration. Rendered verbatim into a ConfigMap as scrub.yaml.
+# Keep secrets OUT of here — inject them via env (see `sessions` / `extraEnv`).
+# ---------------------------------------------------------------------------
+config:
+  routes:
+    - listen_path: /openai
+      upstream: https://api.openai.com
+      profile: openai
+  profiles:
+    openai:
+      scan_paths: ["messages[].content"]
+      stream_paths: ["choices[].delta.content"]
+  masking:
+    mode: dry-run          # validate coverage first; switch to enforce when ready
+    scope: request         # use `session` (+ ha.enabled) for stable cross-turn pseudonyms
+  rules:
+    - { name: email, type: EMAIL, pattern: '[\w.+-]+@[\w.-]+\.\w+', priority: 50 }
+
+# Provide your own complete config file instead of the `config` map above.
+# existingConfigMap: my-scrub-config   # must contain a key `scrub.yaml`
+
+# ---------------------------------------------------------------------------
+# High availability: multiple instances sharing session state via Redis.
+# Switches the workload to a StatefulSet so each pod gets a stable ordinal,
+# fed to SCRUB as a distinct node id (SCRUB_NODE_ID) — the id-space partition
+# that keeps concurrent nodes from colliding. Requires Kubernetes >= 1.28
+# (the apps.kubernetes.io/pod-index downward-API label).
+# ---------------------------------------------------------------------------
+ha:
+  enabled: false
+  # Spread pods across nodes (soft anti-affinity) when no `affinity` is set.
+  antiAffinity: true
+  # PodDisruptionBudget for rolling/maintenance safety.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    # maxUnavailable: ""
+
+# Redis backing the shared session store (used when ha.enabled). The chart does
+# not deploy Redis — point this at your own (e.g. the Bitnami redis chart, or a
+# managed service). Use rediss:// + AUTH in production.
+redis:
+  url: ""                  # e.g. rediss://scrub:pass@redis:6379/0
+
+sessions:
+  # At-rest AES-256-GCM key for stored session vaults (strongly recommended in HA).
+  # Either set the value here (rendered into a Secret) ...
+  encryptionKey: ""
+  # ... or reference an existing Secret containing key `encryption-key`.
+  existingSecret: ""
+
+# Extra environment, mounted secrets, and volumes (TLS certs, CA, log dirs, ...).
+extraEnv: []               # - { name: RUST_LOG, value: "scrub=info" }
+envFrom: []                # - secretRef: { name: scrub-extra }
+extraVolumes: []
+extraVolumeMounts: []
+extraArgs: []              # appended to: --config /etc/scrub/scrub.yaml --listen 0.0.0.0:8080
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: scrub.local
+      paths:
+        - { path: /, pathType: Prefix }
+  tls: []
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: "1"
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 75
+  # targetMemoryUtilizationPercentage: 80
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Hardened by default: the image is a scratch/static binary running as 65532.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+livenessProbe:
+  httpGet: { path: /healthz, port: http }
+  initialDelaySeconds: 2
+  periodSeconds: 10
+readinessProbe:
+  httpGet: { path: /healthz, port: http }
+  initialDelaySeconds: 2
+  periodSeconds: 5
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

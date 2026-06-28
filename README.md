@@ -203,6 +203,15 @@ docker run --rm -p 8080:8080 -v "$PWD/scrub.yaml:/etc/scrub/scrub.yaml:ro" \
 
 Or build from source locally: `docker build -t scrub .`.
 
+**Kubernetes** — a Helm chart is published as an OCI artifact on each release, with
+single-node and **HA** (StatefulSet + Redis, distinct per-pod `node_id`) modes:
+
+```sh
+helm install scrub oci://ghcr.io/scrub-dev/charts/scrub --version X.Y.Z
+```
+
+See [Deployment → Kubernetes](docs/DEPLOYMENT.md#kubernetes-helm).
+
 ---
 
 ## Status

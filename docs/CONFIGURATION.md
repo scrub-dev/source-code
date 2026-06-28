@@ -263,3 +263,11 @@ scrub audit-verify <path>                    # verify an audit log's hash chain
 | `SCRUB_LISTEN` | listen address (overridden by `--listen`) |
 | `RUST_LOG` | log filter, e.g. `scrub=info` |
 | `VAULT_TOKEN` | default Vault token for `vault` sources |
+| `SCRUB_SESSION_BACKEND` | override `sessions.backend` (`memory`/`redis`) |
+| `SCRUB_REDIS_URL` | override `sessions.redis_url` |
+| `SCRUB_ENCRYPTION_KEY` | override `sessions.encryption_key` (at-rest) |
+| `SCRUB_NODE_ID` | override `sessions.node_id` (0..4095; e.g. a pod ordinal) |
+
+The `SCRUB_*` session overrides let an orchestrator inject per-instance cluster
+settings without templating the config — see
+[Deployment → Kubernetes](DEPLOYMENT.md#kubernetes-helm).

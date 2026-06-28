@@ -7,6 +7,14 @@ All notable changes to SCRUB are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Helm chart** (`charts/scrub`), published as an **OCI artifact** to GHCR on each
+  release (`oci://ghcr.io/scrub-dev/charts/scrub`). Single-node by default; an
+  `ha.enabled` mode runs a **StatefulSet + Redis** where each pod gets a distinct
+  `node_id` from its ordinal (PodDisruptionBudget, anti-affinity, optional HPA).
+- **Session env overrides** — `SCRUB_NODE_ID`, `SCRUB_REDIS_URL`,
+  `SCRUB_ENCRYPTION_KEY`, `SCRUB_SESSION_BACKEND` override the config's `sessions`
+  block, so an orchestrator can inject per-instance cluster settings without
+  templating the config file.
 - **Documentation website** (`website/`): a zero-runtime static site (landing + docs +
   guides) styled in the shadcn design language, generated from the repository's canonical
   Markdown by a small Python builder, auto-deployed to GitHub Pages. Renders ` ```mermaid `

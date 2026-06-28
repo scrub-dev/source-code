@@ -40,3 +40,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Test
         run: cargo test --all
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          sudo mv kubeconform /usr/local/bin/
+      - name: Lint
+        run: helm lint charts/scrub
+      - name: Validate (default + HA render)
+        run: |
+          helm template scrub charts/scrub \
+            | kubeconform -strict -ignore-missing-schemas -summary
+          helm template scrub charts/scrub \
+            --set ha.enabled=true --set replicaCount=3 \
+            --set redis.url=rediss://r:6379 --set sessions.encryptionKey=k \
+            --set autoscaling.enabled=true \
+            | kubeconform -strict -ignore-missing-schemas -summary

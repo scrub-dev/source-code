@@ -192,3 +192,50 @@ docker run --rm -p 8080:8080 -v "$PWD/scrub.yaml:/etc/scrub/scrub.yaml:ro" \
 Tags: `:latest` and `:vX.Y.Z`. To build from source locally instead, the
 multi-stage `Dockerfile` compiles a static binary into a minimal image:
 `docker build -t scrub .`.
+
+## Kubernetes (Helm)
+
+A Helm chart is published as an **OCI artifact** to GHCR on each release:
+
+```sh
+# Single instance, default config (dry-run reverse proxy to OpenAI).
+helm install scrub oci://ghcr.io/scrub-dev/charts/scrub --version X.Y.Z
+
+# Your own config: put the scrub.yaml contents under `config:` in values.yaml.
+helm install scrub oci://ghcr.io/scrub-dev/charts/scrub --version X.Y.Z -f my-values.yaml
+```
+
+The chart runs the hardened image (non-root, read-only rootfs), mounts the config
+from a ConfigMap, exposes a `ClusterIP` Service on `:8080`, and wires `/healthz`
+probes. `helm test scrub` runs a health smoke test.
+
+### High availability
+
+```sh
+helm install scrub oci://ghcr.io/scrub-dev/charts/scrub --version X.Y.Z \
+  --set ha.enabled=true --set replicaCount=3 \
+  --set redis.url=rediss://scrub:pass@redis:6379/0 \
+  --set sessions.encryptionKey=<high-entropy secret> \
+  --set config.masking.scope=session
+```
+
+`ha.enabled` switches the workload to a **StatefulSet** so each pod gets a stable
+ordinal, fed to SCRUB as a **distinct `node_id`** (the id-space partition that keeps
+concurrent nodes from colliding). Pods share session state via **Redis**, encrypted
+at rest with your key. The chart also adds a **PodDisruptionBudget** and soft
+**anti-affinity**; set `autoscaling.enabled=true` for an HPA. The topology matches
+the diagram in [High availability](#high-availability-multi-node) above.
+
+> Requires Kubernetes ≥ 1.28 (the `apps.kubernetes.io/pod-index` downward-API label).
+> The chart does not deploy Redis — point `redis.url` at your own (managed, or the
+> Bitnami `redis` chart).
+
+The same wiring works **without Helm** via environment variables that override the
+config's `sessions` block — handy for any orchestrator:
+
+| Env | Overrides |
+|-----|-----------|
+| `SCRUB_NODE_ID` | `sessions.node_id` (0..4095) |
+| `SCRUB_REDIS_URL` | `sessions.redis_url` |
+| `SCRUB_ENCRYPTION_KEY` | `sessions.encryption_key` |
+| `SCRUB_SESSION_BACKEND` | `sessions.backend` (`memory`/`redis`) |

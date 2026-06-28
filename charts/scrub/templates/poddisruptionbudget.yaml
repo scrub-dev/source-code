@@ -1,0 +1,17 @@
+{{- if and .Values.ha.enabled .Values.ha.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "scrub.fullname" . }}
+  labels:
+    {{- include "scrub.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.ha.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.ha.podDisruptionBudget.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ .Values.ha.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "scrub.selectorLabels" . | nindent 6 }}
+{{- end }}

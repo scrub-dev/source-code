@@ -1,0 +1,11 @@
+{{- if not .Values.existingConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "scrub.configMapName" . }}
+  labels:
+    {{- include "scrub.labels" . | nindent 4 }}
+data:
+  scrub.yaml: |
+    {{- toYaml .Values.config | nindent 4 }}
+{{- end }}
