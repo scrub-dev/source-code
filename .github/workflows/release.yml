@@ -151,6 +151,10 @@ jobs:
           file: Dockerfile.release
           platforms: linux/amd64,linux/arm64
           push: true
+          # Clean manifest list — strictly the two platforms (no attestation
+          # manifests that show up as unknown/unknown).
+          provenance: false
+          sbom: false
           tags: |
             ghcr.io/${{ github.repository_owner }}/scrub:${{ github.ref_name }}
             ghcr.io/${{ github.repository_owner }}/scrub:latest
