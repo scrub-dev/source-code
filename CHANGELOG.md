@@ -7,6 +7,9 @@ All notable changes to SCRUB are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Documentation website** (`website/`): a zero-runtime static site (landing + docs +
+  guides) styled in the shadcn design language, generated from the repository's canonical
+  Markdown by a small Python builder, auto-deployed to GitHub Pages.
 - **HTTP-proxy quickstart**: `docs/HTTP-PROXY.md` (use SCRUB as your OS/app HTTP
   proxy), a ready-to-run `examples/proxy.yaml` (CONNECT-proxy interception for
   OpenAI/Anthropic/Gemini/Mistral wired to the curated ruleset), and

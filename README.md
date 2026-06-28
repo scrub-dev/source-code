@@ -17,6 +17,8 @@ client ─┤  app   ├──────────────►│ SCRUB  
             └────────────────────────┴───────────────────────────────┘
 ```
 
+- **Website:** a generated docs/guides site lives in [`website/`](website/) (shadcn-styled,
+  static, deployed to GitHub Pages).
 - **Docs:** [Configuration](docs/CONFIGURATION.md) · [Deployment & Ops](docs/DEPLOYMENT.md) ·
   [Use as an HTTP proxy](docs/HTTP-PROXY.md) · [Security & Threat Model](SECURITY.md) ·
   [Design](DESIGN.md) · [Changelog](CHANGELOG.md)
