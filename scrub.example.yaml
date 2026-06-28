@@ -1,0 +1,105 @@
+# SCRUB example configuration (see DESIGN.md §5).
+# Upstreams are config, not code — point a route at any model API.
+# Each route may override the global `masking` policy (mode/scope/style).
+
+routes:
+  - listen_path: "/openai"
+    upstream: "https://api.openai.com"
+    profile: openai
+  - listen_path: "/anthropic"
+    upstream: "https://api.anthropic.com"
+    profile: anthropic
+  - listen_path: "/canary"              # observe-only on a canary while enforcing elsewhere
+    upstream: "https://api.openai.com"
+    profile: openai
+    mode: dry-run
+  - listen_path: "/internal-llm"        # self-hosted / arbitrary, OpenAI-compatible
+    upstream: "http://llm.internal:8000"
+    profile: openai
+  # TLS-interception route (matched by Host instead of path; see `intercept` below):
+  # - host: "api.openai.com"
+  #   upstream: "https://api.openai.com"
+  #   profile: openai
+
+auth:                          # authenticate clients to the proxy itself (off by default)
+  enabled: false
+  header: x-scrub-key
+  keys: ["replace-with-a-real-key"]
+
+tenants:                       # optional multi-tenant policy (key -> tenant); implies auth
+  - id: acme
+    keys: ["acme-key-1"]
+    mode: enforce              # optional policy overrides (tenant > route > global)
+    scope: session
+    glossary:                  # tenant-private terms, masked only for this tenant
+      - { term: "Project Falcon", type: CODENAME, priority: 100 }
+  - id: globex
+    keys: ["globex-key-1"]
+    mode: dry-run
+
+profiles:
+  openai:
+    scan_paths:                # request content masked
+      - "messages[].content"
+      - "messages[].tool_calls[].function.arguments"
+    stream_paths:              # streaming-response content rehydrated per SSE event
+      - "choices[].delta.content"
+  anthropic:
+    scan_paths:
+      - "messages[].content"
+      - "system"
+    stream_paths:
+      - "delta.text"
+
+masking:
+  mode: enforce                # enforce | dry-run  (dry-run: report only, forward original)
+  style: typed-sentinel        # typed-sentinel | bare-sentinel
+  scope: session               # request | session  (determinism boundary)
+  ttl: 30m                      # session idle timeout (e.g. 45s, 30m, 1h)
+  session_header: x-scrub-session   # request header identifying a session
+
+sources:                       # external secret values to mask, pulled at load + on reload
+  - { kind: dotenv, path: ".env" }                     # each KEY=VALUE -> mask VALUE
+  - { kind: file, path: "secrets.txt", entity_type: SECRET, priority: 80, min_len: 6 }
+
+glossary:                      # literal terms -> Aho-Corasick
+  - { term: "Project Hufflepuff", type: CODENAME, priority: 100 }
+
+rules:                         # regex -> RegexSet
+  - { name: email,   type: EMAIL,  pattern: '[\w.+-]+@[\w.-]+\.\w+', priority: 50 }
+  - { name: aws_key, type: SECRET, pattern: 'AKIA[0-9A-Z]{16}',      priority: 90 }
+
+tls:                           # terminate client HTTPS at the proxy (else plain HTTP)
+  enabled: false
+  # cert_path: "tls/cert.pem"
+  # key_path: "tls/key.pem"
+
+intercept:                     # SNI-transparent TLS interception (MITM); clients trust the CA
+  enabled: false               # routes match by `host`; certs are minted per-SNI from the CA
+  # listen: "127.0.0.1:8443"
+  # ca_cert_path: "ca/ca.pem"
+  # ca_key_path: "ca/ca.key"
+  # upstream_ca_path: "ca/internal-ca.pem"   # extra CA the proxy trusts for upstreams
+
+audit:                         # tamper-evident, append-only audit log (counts/types, no values)
+  enabled: false
+  path: "scrub-audit.jsonl"    # verify with: scrub audit-verify scrub-audit.jsonl
+
+sessions:                      # where session mappings live
+  backend: memory              # memory (single node) | redis (cross-node)
+  # redis_url: "redis://127.0.0.1/"
+  # encryption_key: "use-a-high-entropy-shared-secret"  # AES-256-GCM at rest (redis)
+  # node_id: 0                 # 0..4095, distinct per node (random if unset)
+
+entropy:                       # optional generic-secret catcher (high-entropy tokens)
+  enabled: false
+  min_bits: 3.5                 # bits/char (base64 randomness ≈ 5–6)
+  min_len: 20                   # minimum token length to consider
+  priority: 10                  # low, so named rules/glossary win on overlap
+  entity_type: SECRET
+
+ner:                           # heuristic person-name PII (not a trained model)
+  enabled: false
+  entity_type: PERSON
+  priority: 30
+  names: []                    # extra first names beyond the built-in gazetteer

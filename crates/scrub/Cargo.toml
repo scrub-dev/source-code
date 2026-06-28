@@ -1,0 +1,43 @@
+[package]
+name = "scrub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "SCRUB — masking/rehydration forward proxy for LLM providers."
+
+[[bin]]
+name = "scrub"
+path = "src/main.rs"
+
+[dependencies]
+scrub-core = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "signal"] }
+axum = "0.8"
+axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "tls12"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2"] }
+bytes = { workspace = true }
+futures-util = "0.3"
+arc-swap = "1"
+notify = "6"
+http = "1"
+async-trait = "0.1"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+aes-gcm = "0.10"
+sha2 = "0.10"
+getrandom = "0.2"
+subtle = "2.6"
+rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
+axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }

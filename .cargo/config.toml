@@ -1,0 +1,18 @@
+# Cross-compilation linker/compiler settings for release targets.
+# ring (the TLS crypto provider) needs a C compiler per target; set both the
+# Rust linker and the `cc`-crate compiler so cross-builds link cleanly.
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-gnu-gcc"
+
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+
+[env]
+# Compilers for the `cc` crate when cross-compiling C/asm (e.g. ring).
+CC_aarch64_unknown_linux_gnu = "aarch64-linux-gnu-gcc"
+CC_aarch64_unknown_linux_musl = "aarch64-linux-gnu-gcc"
+CC_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-gcc"
