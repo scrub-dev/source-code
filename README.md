@@ -48,8 +48,8 @@ Implemented:
   any edit/deletion breaks the chain. Verify with `scrub audit-verify <path>`.
 - **Hardened auth**: API keys compared in constant time; unauthenticated `/healthz` liveness.
 - **TLS termination**: serve clients over HTTPS (rustls + `ring`, no OpenSSL/aws-lc).
-- **TLS interception (MITM)**: SNI-transparent mode mints a per-host cert on the fly from a
-  configured CA, routes by `Host`, and masks any intercepted HTTPS upstream (clients trust the CA).
+- **TLS interception (MITM)**: mints a per-host cert on the fly from a configured CA and masks
+  intercepted HTTPS — in **SNI-transparent** or **CONNECT-proxy** mode (clients trust the CA).
 - Provider-agnostic config (`routes` -> upstream URLs), criterion benches.
 
 ## Layout

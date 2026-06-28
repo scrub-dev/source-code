@@ -4,6 +4,14 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/) once it reaches `1.0`.
 
+## [Unreleased]
+
+### Added
+- **CONNECT-proxy TLS interception** (`intercept.connect: true`): clients set SCRUB
+  as their HTTP proxy; SCRUB handles `CONNECT`, MITMs configured hosts (per-host
+  minted certs), and blind-tunnels the rest. Complements the existing
+  SNI-transparent interception.
+
 ## [0.1.0] — 2026-06-28
 
 First public pre-release. A single-binary forward proxy that masks secrets / PII

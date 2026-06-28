@@ -109,6 +109,9 @@ async fn main() -> Result<()> {
     let state = Arc::new(state);
 
     if cfg.intercept.enabled {
+        if cfg.intercept.connect {
+            return serve_connect_proxy(&cfg.intercept, &listen, state).await;
+        }
         return serve_intercept(&cfg.intercept, &listen, state).await;
     }
 
@@ -165,16 +168,8 @@ async fn serve_tls(tls: &scrub_core::config::Tls, listen: &str, app: axum::Route
     Ok(())
 }
 
-/// Serve TLS-interception mode: per-host certs minted from the configured CA,
-/// routing by `Host` to the real upstream (DESIGN §8 v5).
-async fn serve_intercept(
-    cfg: &scrub_core::config::Intercept,
-    default_listen: &str,
-    state: Arc<proxy::AppState>,
-) -> Result<()> {
-    use axum_server::tls_rustls::RustlsConfig;
-    use std::net::SocketAddr;
-
+/// Load the interception CA and build a per-SNI cert-minting rustls server config.
+fn intercept_tls(cfg: &scrub_core::config::Intercept) -> Result<Arc<rustls::ServerConfig>> {
     let ca_cert_path = cfg
         .ca_cert_path
         .clone()
@@ -187,9 +182,21 @@ async fn serve_intercept(
         .with_context(|| format!("reading {ca_cert_path}"))?;
     let ca_key =
         std::fs::read_to_string(&ca_key_path).with_context(|| format!("reading {ca_key_path}"))?;
-
     let minter = Arc::new(scrub::mitm::CertMinter::from_ca_pem(&ca_cert, &ca_key)?);
-    let tls = RustlsConfig::from_config(scrub::mitm::server_config(minter)?);
+    scrub::mitm::server_config(minter)
+}
+
+/// Serve SNI-transparent interception: per-host certs minted from the CA, routing
+/// by `Host` to the real upstream (DESIGN §8 v5).
+async fn serve_intercept(
+    cfg: &scrub_core::config::Intercept,
+    default_listen: &str,
+    state: Arc<proxy::AppState>,
+) -> Result<()> {
+    use axum_server::tls_rustls::RustlsConfig;
+    use std::net::SocketAddr;
+
+    let tls = RustlsConfig::from_config(intercept_tls(cfg)?);
 
     let listen = cfg
         .listen
@@ -207,11 +214,34 @@ async fn serve_intercept(
             handle.graceful_shutdown(Some(Duration::from_secs(10)));
         });
     }
-    tracing::info!(%listen, "scrub starting (TLS interception)");
+    tracing::info!(%listen, "scrub starting (TLS interception, SNI-transparent)");
     axum_server::bind_rustls(addr, tls)
         .handle(handle)
         .serve(proxy::intercept_router(state).into_make_service())
         .await?;
+    Ok(())
+}
+
+/// Serve CONNECT-proxy interception: clients set SCRUB as their HTTP proxy
+/// (DESIGN §8 v5).
+async fn serve_connect_proxy(
+    cfg: &scrub_core::config::Intercept,
+    default_listen: &str,
+    state: Arc<proxy::AppState>,
+) -> Result<()> {
+    let tls = intercept_tls(cfg)?;
+    let listen = cfg
+        .listen
+        .clone()
+        .unwrap_or_else(|| default_listen.to_string());
+    let listener = tokio::net::TcpListener::bind(&listen)
+        .await
+        .with_context(|| format!("binding {listen}"))?;
+    tracing::info!(%listen, "scrub starting (TLS interception, CONNECT proxy)");
+    tokio::select! {
+        _ = scrub::connect::serve(listener, state, tls) => {}
+        _ = shutdown_signal() => {}
+    }
     Ok(())
 }
 

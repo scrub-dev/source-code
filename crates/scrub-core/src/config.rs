@@ -47,6 +47,9 @@ pub struct Config {
 #[serde(default)]
 pub struct Intercept {
     pub enabled: bool,
+    /// CONNECT-proxy mode (clients set SCRUB as their HTTP proxy). When false,
+    /// interception is SNI-transparent (clients reach SCRUB via DNS/SNI).
+    pub connect: bool,
     /// Listen address for the interception endpoint.
     pub listen: Option<String>,
     /// PEM CA cert and key used to mint per-host leaf certs.

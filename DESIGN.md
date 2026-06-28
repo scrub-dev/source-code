@@ -303,7 +303,7 @@ Status: ✅ done · 🚧 partial · ⬜ not started.
 | v2 | ⏸️ | `.env` ingestion + secret-file scanning ✅; Vault / AWS / GCP connectors **deferred until a stable release** (same `SecretSource` seam). |
 | v3 | ✅ | Redis-backed clustering for cross-node sessions (load-modify-store behind a `SessionBackend` seam); **AES-256-GCM at-rest encryption**; **node-disjoint ids + per-field hashes** for concurrent correctness. |
 | v4 | ✅ | NER/PII detection behind the `SpanDetector` seam — heuristic person-name detector shipped; a model-backed detector plugs in via the same trait (`Detector::with_detectors`). |
-| v5 | ✅ | TLS interception (SNI-transparent MITM): per-host certs minted on the fly from a configured CA (`CertMinter` + rustls `ResolvesServerCert`), routed by `Host`. (CONNECT-proxy mode is a later addition.) |
+| v5 | ✅ | TLS interception (MITM): per-host certs minted on the fly from a configured CA (`CertMinter` + rustls `ResolvesServerCert`), routed by `Host`. Both **SNI-transparent** and **CONNECT-proxy** modes (the latter blind-tunnels un-intercepted hosts). |
 | v6 | ⏸️ | Media scanning — OCR/vision over images, ASR over audio — **deferred until a stable release**; reuses the span → Vaultizer → rehydration path. |
 
 > **v2 and v6 are deferred** until SCRUB ships a stable, complete `1.0`. They remain

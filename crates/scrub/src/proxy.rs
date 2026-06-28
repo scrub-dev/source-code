@@ -296,8 +296,6 @@ async fn intercept_proxy(state: &AppState, req: Request) -> anyhow::Result<Respo
     if parts.uri.path() == HEALTH_PATH {
         return Ok(text_response(StatusCode::OK, "ok".to_string()));
     }
-    let compiled = state.compiled.load_full();
-
     let host = parts
         .headers
         .get(header::HOST)
@@ -310,11 +308,19 @@ async fn intercept_proxy(state: &AppState, req: Request) -> anyhow::Result<Respo
             "scrub: missing Host".to_string(),
         ));
     };
-    let Some(route) = compiled.match_host(&host) else {
-        return Ok(text_response(
+    Ok(proxy_to_host(state, &host, Request::from_parts(parts, body)).await)
+}
+
+/// Route `req` by `host` (interception) and mask/forward/rehydrate. Shared by the
+/// SNI-transparent handler and the CONNECT-proxy server.
+pub(crate) async fn proxy_to_host(state: &AppState, host: &str, req: Request) -> Response {
+    let (parts, body) = req.into_parts();
+    let compiled = state.compiled.load_full();
+    let Some(route) = compiled.match_host(host) else {
+        return text_response(
             StatusCode::NOT_FOUND,
             format!("scrub: no intercept route for host {host}"),
-        ));
+        );
     };
     let pq = parts
         .uri
@@ -322,7 +328,21 @@ async fn intercept_proxy(state: &AppState, req: Request) -> anyhow::Result<Respo
         .map(|p| p.as_str())
         .unwrap_or("/");
     let url = format!("{}{}", route.upstream, pq);
-    forward(state, &compiled, route, url, parts, body).await
+    match forward(state, &compiled, route, url, parts, body).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::error!(error = %e, "intercept forward error");
+            text_response(
+                StatusCode::BAD_GATEWAY,
+                format!("scrub: upstream error: {e}"),
+            )
+        }
+    }
+}
+
+/// Whether `host` has a configured interception route (else blind-tunnel).
+pub fn intercepts_host(state: &AppState, host: &str) -> bool {
+    state.compiled.load_full().match_host(host).is_some()
 }
 
 async fn handle(State(state): State<Arc<AppState>>, req: Request) -> Response {

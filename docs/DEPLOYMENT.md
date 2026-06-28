@@ -74,7 +74,12 @@ tls:
    routes:
      - { host: "api.openai.com", upstream: "https://api.openai.com", profile: openai }
    ```
-3. Direct client traffic for those hosts to SCRUB (DNS / SNI redirection).
+3. Direct client traffic to SCRUB. Two modes:
+   - **SNI-transparent** (`connect: false`, default): redirect the hosts to SCRUB via
+     DNS/SNI; SCRUB terminates TLS using the SNI.
+   - **CONNECT proxy** (`connect: true`): clients set SCRUB as their HTTP(S) proxy
+     (`HTTPS_PROXY=http://scrub:8443`). SCRUB MITMs configured hosts and
+     blind-tunnels everything else untouched.
 
 > The CA key can mint a cert for any host — restrict file permissions, keep it off
 > shared storage, and rotate it. Use `intercept.upstream_ca_path` to trust an

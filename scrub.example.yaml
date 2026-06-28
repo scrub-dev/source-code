@@ -74,8 +74,9 @@ tls:                           # terminate client HTTPS at the proxy (else plain
   # cert_path: "tls/cert.pem"
   # key_path: "tls/key.pem"
 
-intercept:                     # SNI-transparent TLS interception (MITM); clients trust the CA
-  enabled: false               # routes match by `host`; certs are minted per-SNI from the CA
+intercept:                     # TLS interception (MITM); clients trust the CA
+  enabled: false               # routes match by `host`; certs are minted per-host from the CA
+  connect: false               # false = SNI-transparent; true = CONNECT proxy (clients set SCRUB as proxy)
   # listen: "127.0.0.1:8443"
   # ca_cert_path: "ca/ca.pem"
   # ca_key_path: "ca/ca.key"
