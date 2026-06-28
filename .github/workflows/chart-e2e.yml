@@ -1,0 +1,55 @@
+name: Chart E2E
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "charts/**"
+      - ".github/workflows/chart-e2e.yml"
+  pull_request:
+    paths:
+      - "charts/**"
+  workflow_dispatch:
+
+concurrency:
+  group: chart-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      # Spins up an ephemeral Kubernetes cluster with working CoreDNS/kube-proxy.
+      - uses: helm/kind-action@v1.10.0
+
+      - name: Default install (Deployment, memory backend)
+        run: |
+          helm install scrub charts/scrub --set image.tag=latest \
+            --wait --timeout 180s
+          kubectl get pods -l app.kubernetes.io/instance=scrub
+          helm test scrub
+
+      - name: HA install (StatefulSet + bundled Redis)
+        run: |
+          helm install scrub-ha charts/scrub --set image.tag=latest \
+            --set ha.enabled=true --set replicaCount=2 \
+            --set redis.enabled=true --set redis.password=pw \
+            --set sessions.encryptionKey=topsecretkey \
+            --set config.masking.scope=session \
+            --wait --timeout 300s
+          kubectl get pods -l app.kubernetes.io/instance=scrub-ha
+          # Confirm each pod got a distinct node id from its ordinal.
+          kubectl get pod scrub-ha-0 -o jsonpath='{.metadata.labels.apps\.kubernetes\.io/pod-index}'
+          kubectl get pod scrub-ha-1 -o jsonpath='{.metadata.labels.apps\.kubernetes\.io/pod-index}'
+          helm test scrub-ha
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods -A
+          kubectl describe pods -l app.kubernetes.io/name=scrub || true
+          kubectl logs -l app.kubernetes.io/name=scrub --tail=80 --all-containers || true

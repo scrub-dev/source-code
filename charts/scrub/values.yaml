@@ -37,6 +37,18 @@ config:
 # existingConfigMap: my-scrub-config   # must contain a key `scrub.yaml`
 
 # ---------------------------------------------------------------------------
+# Turnkey HA in one line (bundled Redis):
+#
+#   helm install scrub oci://ghcr.io/scrub-dev/charts/scrub \
+#     --set ha.enabled=true --set replicaCount=3 \
+#     --set redis.enabled=true --set redis.password=$(openssl rand -hex 16) \
+#     --set sessions.encryptionKey=$(openssl rand -hex 32) \
+#     --set config.masking.scope=session
+#
+# For production, point redis.url at a managed/clustered Redis instead.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # High availability: multiple instances sharing session state via Redis.
 # Switches the workload to a StatefulSet so each pod gets a stable ordinal,
 # fed to SCRUB as a distinct node id (SCRUB_NODE_ID) — the id-space partition

@@ -4,6 +4,17 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/) once it reaches `1.0`.
 
+## [Unreleased]
+
+### Fixed
+- **Image tag now matches the chart**: the release publishes a bare-semver image
+  tag (`scrub:X.Y.Z`, no leading `v`) alongside `:vX.Y.Z`/`:latest`, so the Helm
+  chart's `appVersion`-derived default image reference resolves.
+
+### Added
+- **Chart E2E smoke test**: a `kind` workflow installs the chart (default +
+  HA/bundled-Redis) and runs `helm test` against a real cluster.
+
 ## [0.4.1] — 2026-06-28
 
 ### Added
