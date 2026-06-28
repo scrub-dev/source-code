@@ -95,6 +95,11 @@ audit:                         # tamper-evident, append-only audit log (counts/t
   enabled: false
   path: "scrub-audit.jsonl"    # verify with: scrub audit-verify scrub-audit.jsonl
 
+transactions:                  # full request/response log of the MASKED provider-facing exchange
+  enabled: false               # secret-free in enforce mode; in dry-run it reflects originals
+  path: "scrub-transactions.jsonl"
+  max_body_bytes: 65536        # per-body capture limit (truncated beyond)
+
 sessions:                      # where session mappings live
   backend: memory              # memory (single node) | redis (cross-node)
   # redis_url: "redis://127.0.0.1/"

@@ -48,6 +48,8 @@ Implemented:
   Stored vaults are **encrypted at rest** (AES-256-GCM) when an `encryption_key` is set.
 - **Tamper-evident audit**: hash-chained JSONL of detections (counts/types, never values);
   any edit/deletion breaks the chain. Verify with `scrub audit-verify <path>`.
+- **Transaction log**: full per-request JSONL of the *masked* provider-facing request/response
+  (correlation id via `x-scrub-request-id`) — auditable, secret-free in enforce mode.
 - **Hardened auth**: API keys compared in constant time; unauthenticated `/healthz` liveness.
 - **TLS termination**: serve clients over HTTPS (rustls + `ring`, no OpenSSL/aws-lc).
 - **TLS interception (MITM)**: mints a per-host cert on the fly from a configured CA and masks

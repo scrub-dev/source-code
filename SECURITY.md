@@ -49,6 +49,10 @@ secret sources, or (for the Redis backend) the session store can see secrets.
 - **Audit log** is hash-chained and tamper-evident (`scrub audit-verify`), but it
   is a local file: protect it and consider shipping to append-only/WORM storage.
   It records detection **counts and types only — never values**.
+- **Transaction log** (optional) captures the **masked provider-facing** request and
+  response — secret-free in enforce mode. In **dry-run** mode nothing is masked, so
+  records contain original content; protect the file and avoid dry-run + transactions
+  outside a trusted boundary.
 
 ### Operational guidance
 - Terminate client TLS at SCRUB (`tls`) or run it behind a TLS terminator; the

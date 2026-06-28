@@ -129,6 +129,24 @@ scrub audit-verify /var/log/scrub/audit.jsonl
 
 Ship the file to append-only/WORM storage for compliance.
 
+### Full transaction log
+
+For request/response auditing, enable the transaction log — one JSON line per
+request with the **masked provider-facing** request and response bodies, a
+correlation id (returned as `x-scrub-request-id`), route/tenant/status, and
+detection counts:
+
+```yaml
+transactions:
+  enabled: true
+  path: /var/log/scrub/transactions.jsonl
+  max_body_bytes: 65536
+```
+
+In **enforce** mode the captured bodies are secret-free (only sentinels). In
+**dry-run** mode nothing is masked, so records reflect the original content —
+protect the file accordingly.
+
 ## Configuration reference
 
 | Setting | Purpose |

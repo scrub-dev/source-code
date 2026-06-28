@@ -103,6 +103,15 @@ async fn main() -> Result<()> {
         tracing::info!(path = %cfg.audit.path, "audit log enabled");
         state = state.with_audit(log);
     }
+    if cfg.transactions.enabled {
+        let log = scrub::transactions::TransactionLog::open(&cfg.transactions.path)
+            .with_context(|| format!("opening transaction log {}", cfg.transactions.path))?;
+        tracing::info!(
+            path = %cfg.transactions.path,
+            "transaction log enabled (records the masked provider-facing exchange)"
+        );
+        state = state.with_transactions(log, cfg.transactions.max_body_bytes);
+    }
     // Trust an extra CA for upstream connections (e.g. internal CAs / interception).
     if let Some(ca_path) = &cfg.intercept.upstream_ca_path {
         let pem = std::fs::read(ca_path).with_context(|| format!("reading {ca_path}"))?;

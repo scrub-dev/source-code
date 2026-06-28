@@ -31,6 +31,7 @@ use scrub_core::scan::process_json_paths;
 use scrub_core::vault::{MappingStore, Vault};
 
 use crate::session::SessionBackend;
+use crate::transactions::{self, Recorder};
 
 /// Max request body we will buffer to mask (responses are streamed, not buffered).
 const MAX_REQUEST_BODY: usize = 25 * 1024 * 1024;
@@ -215,6 +216,7 @@ pub struct AppState {
     sessions: Arc<dyn SessionBackend>,
     client: reqwest::Client,
     audit: Option<Arc<crate::audit::AuditLog>>,
+    transactions: Option<(Arc<crate::transactions::TransactionLog>, usize)>,
 }
 
 impl AppState {
@@ -230,12 +232,23 @@ impl AppState {
             sessions,
             client,
             audit: None,
+            transactions: None,
         })
     }
 
     /// Attach a tamper-evident audit log (records every proxied request).
     pub fn with_audit(mut self, audit: Arc<crate::audit::AuditLog>) -> Self {
         self.audit = Some(audit);
+        self
+    }
+
+    /// Attach a full request/response transaction log (max bytes per body).
+    pub fn with_transactions(
+        mut self,
+        log: Arc<crate::transactions::TransactionLog>,
+        max_body: usize,
+    ) -> Self {
+        self.transactions = Some((log, max_body));
         self
     }
 
@@ -492,6 +505,28 @@ async fn forward(
         );
     }
 
+    // Transaction capture (provider-facing exchange — masked, secret-free in
+    // enforce mode). Build pending metadata + request snapshot before the body
+    // is moved into the upstream request.
+    let req_id = state
+        .transactions
+        .as_ref()
+        .map(|_| transactions::request_id());
+    let tx_pending = req_id.as_ref().map(|id| {
+        let (log, max) = state.transactions.clone().unwrap();
+        let meta = transactions::Meta {
+            id: id.clone(),
+            route: label.to_string(),
+            tenant: tenant_id.map(str::to_string),
+            method: parts.method.to_string(),
+            path: parts.uri.path().to_string(),
+            mode: if dry_run { "dry-run" } else { "enforce" }.to_string(),
+            detected: report.total,
+            types: report.by_type.clone(),
+        };
+        (log, max, meta, out_body.clone())
+    });
+
     // Forward upstream. Force identity encoding so we see plaintext sentinels,
     // and never leak the proxy's own auth header to the provider.
     let auth_header = compiled.auth.as_ref().map(|a| a.header.as_str());
@@ -507,6 +542,9 @@ async fn forward(
     // Build the client-facing response.
     let status = upstream.status();
     let is_sse = response_is_sse(upstream.headers());
+    let recorder = tx_pending.map(|(log, max, meta, req)| {
+        transactions::Recorder::new(log, meta, status.as_u16(), &req, max)
+    });
     let mut builder = Response::builder().status(status);
     if let Some(h) = builder.headers_mut() {
         copy_response_headers(upstream.headers(), h);
@@ -518,18 +556,29 @@ async fn forward(
         if let Ok(v) = HeaderValue::from_str(&report.summary()) {
             h.insert("x-scrub-detected", v);
         }
+        if let Some(v) = req_id
+            .as_deref()
+            .and_then(|i| HeaderValue::from_str(i).ok())
+        {
+            h.insert("x-scrub-request-id", v);
+        }
     }
 
     let body = if dry_run {
         // Dry-run forwarded the original — nothing to rehydrate.
-        Body::from_stream(passthrough_stream(upstream))
+        Body::from_stream(passthrough_stream(upstream, recorder))
     } else if is_sse && !stream_paths.is_empty() {
         // Streaming: a sentinel is fragmented across delta events, so rehydrate
         // per-event content through a persistent rehydrator (not raw bytes).
-        Body::from_stream(sse_rehydrating_stream(upstream, vault, stream_paths))
+        Body::from_stream(sse_rehydrating_stream(
+            upstream,
+            vault,
+            stream_paths,
+            recorder,
+        ))
     } else {
         // Non-streaming JSON: the full sentinel is contiguous in one body.
-        Body::from_stream(rehydrating_stream(upstream, vault))
+        Body::from_stream(rehydrating_stream(upstream, vault, recorder))
     };
     Ok(builder.body(body)?)
 }
@@ -542,13 +591,46 @@ fn response_is_sse(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
-/// Stream an upstream response straight through (dry-run: nothing was masked).
+/// Stream an upstream response straight through (dry-run: nothing was masked),
+/// optionally recording the transaction.
 fn passthrough_stream(
     upstream: reqwest::Response,
+    recorder: Option<Recorder>,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
-    upstream
-        .bytes_stream()
-        .map(|r| r.map_err(std::io::Error::other))
+    struct St {
+        up: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
+        rec: Option<Recorder>,
+        done: bool,
+    }
+    let st = St {
+        up: Box::pin(upstream.bytes_stream()),
+        rec: recorder,
+        done: false,
+    };
+    futures_util::stream::unfold(st, |mut st| async move {
+        if st.done {
+            return None;
+        }
+        match st.up.next().await {
+            Some(Ok(chunk)) => {
+                if let Some(r) = &mut st.rec {
+                    r.push_response(&chunk);
+                }
+                Some((Ok(chunk), st))
+            }
+            Some(Err(e)) => {
+                st.done = true;
+                Some((Err(std::io::Error::other(e)), st))
+            }
+            None => {
+                st.done = true;
+                if let Some(r) = st.rec.take() {
+                    r.finish();
+                }
+                None
+            }
+        }
+    })
 }
 
 /// Rehydrate an SSE response. The masked sentinel is fragmented across `data:`
@@ -561,6 +643,7 @@ fn sse_rehydrating_stream(
     upstream: reqwest::Response,
     vault: Arc<dyn MappingStore>,
     stream_paths: Vec<String>,
+    recorder: Option<Recorder>,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
     struct St {
         up: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
@@ -568,6 +651,7 @@ fn sse_rehydrating_stream(
         re: Rehydrator,
         vault: Arc<dyn MappingStore>,
         paths: Vec<String>,
+        rec: Option<Recorder>,
         done: bool,
     }
 
@@ -577,6 +661,7 @@ fn sse_rehydrating_stream(
         re: Rehydrator::new(), // Raw: serde re-escapes on re-serialization
         vault,
         paths: stream_paths,
+        rec: recorder,
         done: false,
     };
 
@@ -596,6 +681,9 @@ fn sse_rehydrating_stream(
             }
             match st.up.next().await {
                 Some(Ok(chunk)) => {
+                    if let Some(r) = &mut st.rec {
+                        r.push_response(&chunk); // capture the upstream (masked) bytes
+                    }
                     st.buf.extend_from_slice(&chunk);
                 }
                 Some(Err(e)) => {
@@ -616,6 +704,9 @@ fn sse_rehydrating_stream(
                         );
                     }
                     out.extend_from_slice(&st.re.finish()); // any held-back bytes, verbatim
+                    if let Some(r) = st.rec.take() {
+                        r.finish(); // upstream done — write the transaction record
+                    }
                     if out.is_empty() {
                         return None;
                     }
@@ -673,11 +764,13 @@ fn process_sse_event(
 fn rehydrating_stream(
     upstream: reqwest::Response,
     vault: Arc<dyn MappingStore>,
+    recorder: Option<Recorder>,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
     struct St {
         up: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
         re: Rehydrator,
         vault: Arc<dyn MappingStore>,
+        rec: Option<Recorder>,
         done: bool,
     }
 
@@ -685,6 +778,7 @@ fn rehydrating_stream(
         up: Box::pin(upstream.bytes_stream()),
         re: Rehydrator::with_encoding(Encoding::JsonString),
         vault,
+        rec: recorder,
         done: false,
     };
 
@@ -695,6 +789,9 @@ fn rehydrating_stream(
             }
             match st.up.next().await {
                 Some(Ok(chunk)) => {
+                    if let Some(r) = &mut st.rec {
+                        r.push_response(&chunk); // capture the upstream (masked) bytes
+                    }
                     let out = st.re.push(&chunk, st.vault.as_ref());
                     if out.is_empty() {
                         continue; // held back waiting for more bytes
@@ -708,6 +805,9 @@ fn rehydrating_stream(
                 None => {
                     st.done = true;
                     let tail = st.re.finish();
+                    if let Some(r) = st.rec.take() {
+                        r.finish(); // upstream done — write the transaction record
+                    }
                     if tail.is_empty() {
                         return None;
                     }

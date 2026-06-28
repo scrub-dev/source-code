@@ -10,3 +10,4 @@ pub mod redis_backend;
 pub mod reload;
 pub mod secrets;
 pub mod session;
+pub mod transactions;

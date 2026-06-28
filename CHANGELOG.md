@@ -7,6 +7,11 @@ All notable changes to SCRUB are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Request/response transaction log** (`transactions.enabled`): one JSON line per
+  request capturing the **masked provider-facing exchange** (request sent upstream
+  + response received), with a correlation id (`x-scrub-request-id` header), route,
+  tenant, status, and detection counts. Secret-free in enforce mode by design;
+  bodies bounded by `max_body_bytes`.
 - **HashiCorp Vault secret source** (`sources[].kind: vault`): pull KV v2 secret
   values at startup/reload and mask them, via the same `SecretSource` seam as
   `.env`/file sources (token from config / file / env).

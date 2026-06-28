@@ -34,6 +34,8 @@ pub struct Config {
     pub sessions: Sessions,
     /// Optional tamper-evident audit log (DESIGN §7).
     pub audit: Audit,
+    /// Optional full request/response transaction log (DESIGN §7).
+    pub transactions: Transactions,
     /// Optional TLS termination for clients of the proxy.
     pub tls: Tls,
     /// Optional TLS interception (SNI-transparent MITM) mode (DESIGN §8 v5).
@@ -82,6 +84,29 @@ impl Default for Audit {
         Self {
             enabled: false,
             path: "scrub-audit.jsonl".to_string(),
+        }
+    }
+}
+
+/// Full request/response transaction log. Records the **provider-facing**
+/// exchange — the masked request sent upstream and the masked response received
+/// — so every transaction is auditable without storing secrets at rest. (In
+/// dry-run mode nothing is masked, so records reflect the original content.)
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct Transactions {
+    pub enabled: bool,
+    pub path: String,
+    /// Max bytes captured per request and per response body (each truncated).
+    pub max_body_bytes: usize,
+}
+
+impl Default for Transactions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            path: "scrub-transactions.jsonl".to_string(),
+            max_body_bytes: 64 * 1024,
         }
     }
 }
