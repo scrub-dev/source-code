@@ -229,32 +229,17 @@ in v0 is throwaway.
 
 ## 6. Component architecture
 
+```mermaid
+flowchart TD
+    C(["Client"]) -->|request| L["Listener — HTTP/1.1, H2, SSE"]
+    L --> D["Detection pipeline · egress<br/>Aho-Corasick ‖ RegexSet ‖ entropy — single pass, merged spans"]
+    D -->|spans| V["Vaultizer + Mapping<br/>span → ⟦S:TYPE·id⟧ · in-mem, Redis opt-in for cluster"]
+    V -->|scrubbed body| U[["Upstream provider"]]
+    U -->|"response · often SSE"| R["Rehydration state-machine · ingress<br/>memchr scan · reverse lookup · bounded-tail buffering"]
+    R -->|rehydrated| C
 ```
-        ┌─────────────────────────────────────────────────┐
-client → │ Listener (HTTP/1.1, H2, SSE; explicit endpoint)  │
-        └───────────────────────┬─────────────────────────┘
-                                │
-                    ┌───────────▼───────────┐
-                    │ Detection pipeline      │ Aho-Corasick ‖ RegexSet ‖ entropy
-                    │ (egress)                │ single pass, merged spans
-                    └───────────┬───────────┘
-                                │ spans
-                    ┌───────────▼───────────┐
-                    │ Vaultizer + Mapping     │ span → ⟦S:TYPE·id⟧
-                    │ (request/session map)   │ in-mem; Redis opt-in for cluster
-                    └───────────┬───────────┘
-                                │ scrubbed body
-                          upstream provider
-                                │ response (often SSE)
-                    ┌───────────▼───────────┐
-                    │ Rehydration state-      │ memchr scan, reverse lookup,
-                    │ machine (ingress)       │ bounded-tail buffering
-                    └───────────┬───────────┘
-                                │
-                             client
 
-cross-cutting: Config + hot reload · Policy engine · Observability/audit · Secure wipe
-```
+Cross-cutting: config + hot reload · policy engine · observability/audit · secure wipe.
 
 ### Trait boundaries (stable seams for later phases)
 - `SecretSource` — pluggable origin of sensitive terms (config file → Vault / AWS / GCP /

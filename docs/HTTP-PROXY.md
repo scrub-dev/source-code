@@ -9,9 +9,11 @@ configured (presenting a certificate minted from your CA), masks the request,
 forwards it to the real provider, and rehydrates the response. **Every other host
 is blind-tunnelled byte-for-byte**, so the rest of your traffic is untouched.
 
-```
-app ──HTTP proxy──► SCRUB ──┬─ configured host?  ► MITM + mask ► provider ► rehydrate
-   (HTTPS_PROXY)            └─ otherwise          ► blind tunnel ► host
+```mermaid
+flowchart TD
+    A([App]) -->|"CONNECT host:443 · HTTPS_PROXY"| S{"SCRUB:<br/>configured host?"}
+    S -->|yes| M["MITM with a minted cert<br/>mask → forward → rehydrate"] --> P[["LLM provider"]]
+    S -->|no| T["Blind tunnel · untouched"] --> H[["Origin host"]]
 ```
 
 ## 1. Create and trust a CA

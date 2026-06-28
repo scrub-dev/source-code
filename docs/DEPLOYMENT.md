@@ -94,6 +94,17 @@ tls:
 Run several SCRUB instances behind a load balancer. For **session scope** to work
 across nodes, use the Redis backend; give each node a distinct `node_id`:
 
+```mermaid
+flowchart LR
+    LB["Load balancer"] --> N0["SCRUB · node_id 0"]
+    LB --> N1["SCRUB · node_id 1"]
+    LB --> N2["SCRUB · node_id N"]
+    N0 & N1 & N2 --> R[("Redis<br/>encrypted session maps")]
+    N0 & N1 & N2 --> P[["LLM provider"]]
+```
+
+
+
 ```yaml
 sessions:
   backend: redis

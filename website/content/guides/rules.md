@@ -16,6 +16,20 @@ pass and resolves overlaps deterministically by priority.
 Glossary terms and secret-source values feed one Aho-Corasick automaton; rules compile into
 one `regex-automata` meta-engine. Cost stays roughly flat as you add rules.
 
+```mermaid
+flowchart LR
+    IN["Request content<br/>scan_paths"] --> G["Glossary<br/>Aho-Corasick"]
+    IN --> RX["Rules<br/>regex meta-engine"]
+    IN --> EN["Entropy"]
+    IN --> NER["NER"]
+    SRC[(".env · file · Vault")] -. feeds .-> G
+    G --> OV{"Overlap<br/>by priority"}
+    RX --> OV
+    EN --> OV
+    NER --> OV
+    OV --> SP["Spans → mask ⟦S:TYPE·id⟧"]
+```
+
 ## Writing a rule
 
 ```yaml
