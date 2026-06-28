@@ -1,0 +1,67 @@
+# SCRUB — common secret/credential detection rules.
+#
+# A curated, ready-to-use ruleset for popular token/key/credential formats.
+# Use it directly, or copy the `rules:` and `entropy:` blocks into your config.
+#
+# Patterns favor recall (catching a secret matters more than a false positive).
+# Validate coverage with `masking.mode: dry-run` before enforcing, and keep the
+# entropy catcher on for high-entropy secrets that no named pattern covers.
+#
+# Higher `priority` wins when patterns overlap (e.g. a provider-specific token
+# beats the generic assignment rule).
+
+routes:
+  - { listen_path: "/openai", upstream: "https://api.openai.com", profile: chat }
+  - { listen_path: "/anthropic", upstream: "https://api.anthropic.com", profile: chat }
+
+profiles:
+  chat:
+    scan_paths:
+      - "messages[].content"
+      - "messages[].tool_calls[].function.arguments"
+      - "system"
+    stream_paths:
+      - "choices[].delta.content"   # OpenAI
+      - "delta.text"                # Anthropic
+
+masking:
+  mode: enforce                     # start with dry-run when onboarding
+
+rules:
+  # ---- Cloud provider keys ----
+  - { name: aws_access_key_id, type: AWS_KEY,    priority: 95, pattern: '\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA)[0-9A-Z]{16}\b' }
+  - { name: aws_secret_key,    type: AWS_SECRET, priority: 70, pattern: '(?i)aws_secret_access_key\s*[=:]\s*["'']?[A-Za-z0-9/+]{40}' }
+  - { name: gcp_api_key,       type: GCP_KEY,    priority: 95, pattern: '\bAIza[0-9A-Za-z\-_]{35}\b' }
+  - { name: gcp_oauth_token,   type: GCP_OAUTH,  priority: 90, pattern: '\bya29\.[0-9A-Za-z\-_]+' }
+  - { name: digitalocean_pat,  type: DO_TOKEN,   priority: 95, pattern: '\bdop_v1_[0-9a-f]{64}\b' }
+
+  # ---- Git hosting ----
+  - { name: github_token,      type: GITHUB_TOKEN, priority: 95, pattern: '\bgh[posru]_[0-9A-Za-z]{36}\b' }
+  - { name: github_fine_pat,   type: GITHUB_TOKEN, priority: 95, pattern: '\bgithub_pat_[0-9A-Za-z_]{82}\b' }
+  - { name: gitlab_pat,        type: GITLAB_TOKEN, priority: 95, pattern: '\bglpat-[0-9A-Za-z\-_]{20}\b' }
+
+  # ---- SaaS / API tokens ----
+  - { name: slack_token,       type: SLACK_TOKEN,   priority: 95, pattern: '\bxox[baprs]-[0-9A-Za-z\-]{10,}\b' }
+  - { name: slack_webhook,     type: SLACK_WEBHOOK, priority: 90, pattern: 'https://hooks\.slack\.com/services/[A-Za-z0-9/]+' }
+  - { name: stripe_key,        type: STRIPE_KEY,    priority: 95, pattern: '\b[rs]k_(?:live|test)_[0-9A-Za-z]{24,}\b' }
+  - { name: sendgrid_key,      type: SENDGRID_KEY,  priority: 95, pattern: '\bSG\.[0-9A-Za-z\-_]{22}\.[0-9A-Za-z\-_]{43}\b' }
+  - { name: twilio_sid,        type: TWILIO,        priority: 90, pattern: '\bAC[0-9a-fA-F]{32}\b' }
+  - { name: npm_token,         type: NPM_TOKEN,     priority: 95, pattern: '\bnpm_[0-9A-Za-z]{36}\b' }
+  - { name: openai_key,        type: OPENAI_KEY,    priority: 95, pattern: '\bsk-(?:proj-)?[A-Za-z0-9\-_]{20,}\b' }
+  - { name: anthropic_key,     type: ANTHROPIC_KEY, priority: 96, pattern: '\bsk-ant-[0-9A-Za-z\-_]{20,}\b' }
+
+  # ---- Structural / generic credentials ----
+  - { name: jwt,               type: JWT,            priority: 80, pattern: '\beyJ[0-9A-Za-z\-_]+\.eyJ[0-9A-Za-z\-_]+\.[0-9A-Za-z\-_]+' }
+  - { name: private_key,       type: PRIVATE_KEY,    priority: 99, pattern: '-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]+?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----' }
+  - { name: credential_url,    type: CREDENTIAL_URL, priority: 90, pattern: '\b[a-z][a-z0-9+.\-]*://[^\s:/@]+:[^\s:/@]+@[^\s/]+' }
+  - { name: bearer_token,      type: BEARER,         priority: 60, pattern: '(?i)bearer\s+[A-Za-z0-9\-._~+/]{20,}={0,2}' }
+  - { name: generic_secret,    type: SECRET,         priority: 50, pattern: '(?i)(?:api[_-]?key|secret|token|password|passwd|pwd|access[_-]?token|client[_-]?secret)\s*[=:]\s*["'']?[A-Za-z0-9\-_./+]{12,}' }
+
+  # ---- PII ----
+  - { name: email,             type: EMAIL,          priority: 40, pattern: '\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b' }
+
+entropy:                       # generic high-entropy secret catcher
+  enabled: true
+  min_bits: 4.0
+  min_len: 24
+  priority: 10

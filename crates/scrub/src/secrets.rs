@@ -42,8 +42,13 @@ pub fn load_sources(specs: &[SourceSpec], base_dir: &Path) -> Vec<LiteralTerm> {
 pub fn source_paths(specs: &[SourceSpec], base_dir: &Path) -> Vec<PathBuf> {
     specs
         .iter()
-        .map(|s| match s {
-            SourceSpec::Dotenv { path, .. } | SourceSpec::File { path, .. } => base_dir.join(path),
+        .filter_map(|s| match s {
+            SourceSpec::Dotenv { path, .. } | SourceSpec::File { path, .. } => {
+                Some(base_dir.join(path))
+            }
+            // Watch the token file (rotation triggers reload); the Vault secrets
+            // themselves are pulled only on reload, not polled.
+            SourceSpec::Vault { token_path, .. } => token_path.as_ref().map(|p| base_dir.join(p)),
         })
         .collect()
 }
@@ -68,6 +73,27 @@ fn from_spec(spec: &SourceSpec, base_dir: &Path) -> Box<dyn SecretSource> {
             min_len,
         } => Box::new(FileSource {
             path: base_dir.join(path),
+            entity_type: entity_type.clone(),
+            priority: *priority,
+            min_len: *min_len,
+        }),
+        SourceSpec::Vault {
+            address,
+            mount,
+            paths,
+            token,
+            token_path,
+            token_env,
+            entity_type,
+            priority,
+            min_len,
+        } => Box::new(VaultSource {
+            address: address.trim_end_matches('/').to_string(),
+            mount: mount.clone(),
+            paths: paths.clone(),
+            token: token.clone(),
+            token_path: token_path.as_ref().map(|p| base_dir.join(p)),
+            token_env: token_env.clone(),
             entity_type: entity_type.clone(),
             priority: *priority,
             min_len: *min_len,
@@ -139,6 +165,80 @@ impl SecretSource for FileSource {
                 ty: Some(self.entity_type.clone()),
                 priority: self.priority,
             });
+        }
+        Ok(terms)
+    }
+}
+
+/// HashiCorp Vault KV v2 source: reads each path and masks its string values.
+struct VaultSource {
+    address: String,
+    mount: String,
+    paths: Vec<String>,
+    token: Option<String>,
+    token_path: Option<PathBuf>,
+    token_env: Option<String>,
+    entity_type: String,
+    priority: i32,
+    min_len: usize,
+}
+
+impl VaultSource {
+    /// Resolve the token: literal > token file > env (default `VAULT_TOKEN`).
+    fn token(&self) -> std::io::Result<String> {
+        if let Some(t) = &self.token {
+            return Ok(t.clone());
+        }
+        if let Some(p) = &self.token_path {
+            return Ok(std::fs::read_to_string(p)?.trim().to_string());
+        }
+        let var = self.token_env.as_deref().unwrap_or("VAULT_TOKEN");
+        std::env::var(var)
+            .map_err(|_| std::io::Error::other(format!("no Vault token ({var} unset)")))
+    }
+}
+
+impl SecretSource for VaultSource {
+    fn name(&self) -> String {
+        format!("vault:{}/{}", self.address, self.mount)
+    }
+
+    fn load(&self) -> std::io::Result<Vec<LiteralTerm>> {
+        let token = self.token()?;
+        // Blocking client — `load` is sync and runs off the async runtime
+        // (startup uses spawn_blocking; the reload watcher is its own thread).
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(std::io::Error::other)?;
+
+        let mut terms = Vec::new();
+        for path in &self.paths {
+            // KV v2 data API: <addr>/v1/<mount>/data/<path>
+            let url = format!("{}/v1/{}/data/{}", self.address, self.mount, path);
+            let resp = client
+                .get(&url)
+                .header("X-Vault-Token", &token)
+                .send()
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| std::io::Error::other(format!("vault {url}: {e}")))?;
+            let body = resp.text().map_err(std::io::Error::other)?;
+            let json: serde_json::Value =
+                serde_json::from_str(&body).map_err(std::io::Error::other)?;
+            // KV v2 nests the secret map under data.data.
+            if let Some(map) = json["data"]["data"].as_object() {
+                for value in map.values() {
+                    if let Some(s) = value.as_str() {
+                        if s.len() >= self.min_len {
+                            terms.push(LiteralTerm {
+                                term: s.to_string(),
+                                ty: Some(self.entity_type.clone()),
+                                priority: self.priority,
+                            });
+                        }
+                    }
+                }
+            }
         }
         Ok(terms)
     }

@@ -136,8 +136,8 @@ Ship the file to append-only/WORM storage for compliance.
 | `routes[]` | inbound path (or `host`) → upstream + profile + optional policy overrides |
 | `profiles{}` | `scan_paths` (request) / `stream_paths` (SSE response) per provider |
 | `masking.{mode,style,scope,ttl,session_header}` | global policy defaults |
-| `rules[]`, `glossary[]`, `entropy`, `ner` | detection |
-| `sources[]` | `.env` / secret-file ingestion |
+| `rules[]`, `glossary[]`, `entropy`, `ner` | detection (curated set: `examples/common-rules.yaml`) |
+| `sources[]` | `.env` / secret-file / **Vault** (KV v2) ingestion |
 | `auth`, `tenants[]` | client auth and multi-tenant policy |
 | `sessions` | backend (memory/redis), encryption, `node_id` |
 | `tls`, `intercept` | TLS termination / interception |

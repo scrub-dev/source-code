@@ -61,6 +61,15 @@ masking:
 sources:                       # external secret values to mask, pulled at load + on reload
   - { kind: dotenv, path: ".env" }                     # each KEY=VALUE -> mask VALUE
   - { kind: file, path: "secrets.txt", entity_type: SECRET, priority: 80, min_len: 6 }
+  # HashiCorp Vault (KV v2). Token: token / token_path / token_env (default VAULT_TOKEN).
+  # - kind: vault
+  #   address: "https://vault.internal:8200"
+  #   mount: "secret"
+  #   paths: ["app/prod", "shared/api-keys"]
+  #   token_env: "VAULT_TOKEN"
+
+# Curated rules for common token/key/credential formats live in
+# examples/common-rules.yaml — copy its `rules:`/`entropy:` blocks here.
 
 glossary:                      # literal terms -> Aho-Corasick
   - { term: "Project Hufflepuff", type: CODENAME, priority: 100 }

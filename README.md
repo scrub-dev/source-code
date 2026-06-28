@@ -26,7 +26,9 @@ Implemented:
 - **SSE-aware rehydration** — a sentinel fragmented across `data:` delta events (real LLM
   streaming) reassembles via per-event content rehydration (`stream_paths`).
 - **Async proxy**: route matching to upstream URLs, request masking, streamed response rehydration.
-- **Secret sources**: `.env` and secret-file ingestion feeding the same masking automaton.
+- **Secret sources**: `.env`, secret-file, and **HashiCorp Vault** (KV v2) ingestion feeding
+  the same masking automaton. Curated rules for common token/key formats in
+  [`examples/common-rules.yaml`](examples/common-rules.yaml).
 - **Hot-reload**: config + watched source files recompile and swap atomically (`arc-swap`); a
   bad edit keeps the last good config. No restart needed.
 - **Session scope**: shared per-session vault keyed by a request header → stable pseudonyms

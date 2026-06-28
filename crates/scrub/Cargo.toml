@@ -24,7 +24,7 @@ hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 http-body-util = "0.1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2", "blocking"] }
 bytes = { workspace = true }
 futures-util = "0.3"
 arc-swap = "1"

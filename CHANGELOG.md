@@ -4,6 +4,18 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/) once it reaches `1.0`.
 
+## [Unreleased]
+
+### Added
+- **HashiCorp Vault secret source** (`sources[].kind: vault`): pull KV v2 secret
+  values at startup/reload and mask them, via the same `SecretSource` seam as
+  `.env`/file sources (token from config / file / env).
+- **Curated default rules** (`examples/common-rules.yaml`): ready-to-use regex
+  ruleset for popular secret formats — AWS/GCP/DigitalOcean keys, GitHub/GitLab
+  tokens, Slack/Stripe/SendGrid/Twilio/npm/OpenAI/Anthropic tokens, JWTs, PEM
+  private keys, credential URLs, bearer tokens, and generic assignments — plus a
+  high-entropy catcher. Validated by tests.
+
 ## [0.2.0] — 2026-06-28
 
 ### Added

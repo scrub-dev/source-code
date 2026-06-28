@@ -174,6 +174,34 @@ pub enum SourceSpec {
         #[serde(default = "default_min_len")]
         min_len: usize,
     },
+    /// HashiCorp Vault KV v2: read each `paths` entry and mask the string values.
+    /// Resolved at startup/reload (no live polling). Token resolution order:
+    /// `token` > `token_path` file > `token_env` (default `VAULT_TOKEN`).
+    Vault {
+        /// Base address, e.g. `https://vault.internal:8200`.
+        address: String,
+        /// KV v2 mount point.
+        #[serde(default = "default_vault_mount")]
+        mount: String,
+        /// Secret paths under the mount (KV v2).
+        paths: Vec<String>,
+        #[serde(default)]
+        token: Option<String>,
+        #[serde(default)]
+        token_path: Option<String>,
+        #[serde(default)]
+        token_env: Option<String>,
+        #[serde(default = "default_secret_type")]
+        entity_type: String,
+        #[serde(default = "default_source_priority")]
+        priority: i32,
+        #[serde(default = "default_min_len")]
+        min_len: usize,
+    },
+}
+
+fn default_vault_mount() -> String {
+    "secret".to_string()
 }
 
 fn default_secret_type() -> String {

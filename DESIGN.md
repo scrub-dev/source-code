@@ -300,7 +300,7 @@ Status: ✅ done · 🚧 partial · ⬜ not started.
 |-------|--------|-------|
 | **v0** | ✅ | Explicit-endpoint proxy, provider-aware scan, glossary + regex + **entropy** from config, typed-sentinel masking, request + **session** in-mem map, **streaming rehydration**, **hot reload**, criterion benches. |
 | v1 | ✅ | **Tamper-evident audit log** ✅, **dry-run mode** ✅, **per-route policy** ✅, **proxy auth** ✅, **per-tenant policy** ✅, **multi-arch release binaries** ✅ (CI + `build-release.sh`). |
-| v2 | ⏸️ | `.env` ingestion + secret-file scanning ✅; Vault / AWS / GCP connectors **deferred until a stable release** (same `SecretSource` seam). |
+| v2 | 🚧 | `.env` + secret-file ✅; **HashiCorp Vault (KV v2)** connector ✅; AWS / GCP secret managers ⏸️ (same `SecretSource` seam). Curated common-secret ruleset shipped. |
 | v3 | ✅ | Redis-backed clustering for cross-node sessions (load-modify-store behind a `SessionBackend` seam); **AES-256-GCM at-rest encryption**; **node-disjoint ids + per-field hashes** for concurrent correctness. |
 | v4 | ✅ | NER/PII detection behind the `SpanDetector` seam — heuristic person-name detector shipped; a model-backed detector plugs in via the same trait (`Detector::with_detectors`). |
 | v5 | ✅ | TLS interception (MITM): per-host certs minted on the fly from a configured CA (`CertMinter` + rustls `ResolvesServerCert`), routed by `Host`. Both **SNI-transparent** and **CONNECT-proxy** modes (the latter blind-tunnels un-intercepted hosts). |

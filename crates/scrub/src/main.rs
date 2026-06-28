@@ -53,8 +53,14 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| DEFAULT_LISTEN.to_string());
 
     let config_path = PathBuf::from(config_path);
-    let (cfg, compiled) = reload::load(&config_path)
-        .with_context(|| format!("compiling config {}", config_path.display()))?;
+    // Off the async runtime: secret sources (e.g. Vault) may do blocking I/O.
+    let (cfg, compiled) = {
+        let cp = config_path.clone();
+        tokio::task::spawn_blocking(move || reload::load(&cp))
+            .await
+            .context("config load task panicked")?
+            .with_context(|| format!("compiling config {}", config_path.display()))?
+    };
     let handle = Arc::new(ArcSwap::from_pointee(compiled));
 
     let ttl = session::parse_duration(cfg.masking.ttl.as_deref(), DEFAULT_TTL);
