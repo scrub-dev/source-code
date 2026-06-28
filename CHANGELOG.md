@@ -4,6 +4,16 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/) once it reaches `1.0`.
 
+## [0.3.1] — 2026-06-28
+
+### CI/CD
+- **Release pipeline hardened**: SHA-256 `SHA256SUMS` for every artifact,
+  CHANGELOG-derived release notes, a published GHCR container image
+  (`ghcr.io/scrub-dev/scrub:<tag>` + `:latest`), and concurrency guards.
+- **CI** now runs the test suite on Linux, macOS, and Windows.
+- Fixed the release workflow's duplicate-`.cargo/config.toml` bug that failed
+  all Linux build legs.
+
 ## [0.3.0] — 2026-06-28
 
 ### Added
@@ -77,6 +87,7 @@ including across streamed responses.
 - Media (image/audio) scanning — the `Detector`/`Span` seam is in place.
 - CONNECT-proxy MITM mode (current interception is SNI-transparent).
 
+[0.3.1]: https://github.com/scrub-dev/scrub/releases/tag/v0.3.1
 [0.3.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.3.0
 [0.2.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.2.0
 [0.1.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.1.0
