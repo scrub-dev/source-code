@@ -4,7 +4,7 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/) once it reaches `1.0`.
 
-## [Unreleased]
+## [0.2.0] — 2026-06-28
 
 ### Added
 - **CONNECT-proxy TLS interception** (`intercept.connect: true`): clients set SCRUB
@@ -57,4 +57,5 @@ including across streamed responses.
 - Media (image/audio) scanning — the `Detector`/`Span` seam is in place.
 - CONNECT-proxy MITM mode (current interception is SNI-transparent).
 
+[0.2.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.2.0
 [0.1.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.1.0
