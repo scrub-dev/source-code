@@ -76,6 +76,15 @@ def rewrite_link(href: str) -> str:
 def md_to_html(path: str):
     with open(path, encoding="utf-8") as f:
         text = f.read()
+    # Pull ```mermaid fences out before Markdown sees them, so they render as
+    # diagrams (client-side) instead of highlighted code.
+    mermaid = []
+
+    def _stash(m):
+        mermaid.append(m.group(1))
+        return f"\n\nMERMAIDBLK{len(mermaid) - 1}ENDMERMAIDBLK\n\n"
+
+    text = re.sub(r"```mermaid[ \t]*\n(.*?)\n```", _stash, text, flags=re.S)
     md = markdown.Markdown(
         extensions=["extra", "codehilite", "toc", "sane_lists", "admonition"],
         extension_configs={"codehilite": {"guess_lang": False, "css_class": "codehilite"}},
@@ -89,11 +98,17 @@ def md_to_html(path: str):
         r'href="\1" target="_blank" rel="noopener"',
         body,
     )
+    # swap mermaid placeholders back in as diagram nodes
+    for i, block in enumerate(mermaid):
+        body = body.replace(
+            f"<p>MERMAIDBLK{i}ENDMERMAIDBLK</p>",
+            f'<pre class="mermaid">{html_mod.escape(block)}</pre>',
+        )
     toc = getattr(md, "toc_tokens", [])
     # page title = first h1 text, else slug
     m = re.search(r"^#\s+(.+)$", text, re.M)
     title = m.group(1).strip() if m else None
-    return body, toc, title
+    return body, toc, title, bool(mermaid)
 
 
 def relprefix(depth: int) -> str:
@@ -220,7 +235,11 @@ def head(title: str, prefix: str, desc: str) -> str:
 </head>"""
 
 
-def doc_page(sec, slug, title, body, toc, prefix):
+def doc_page(sec, slug, title, body, toc, prefix, has_mermaid=False):
+    mermaid = (
+        f'<script type="module" src="{prefix}assets/mermaid-init.js"></script>'
+        if has_mermaid else ""
+    )
     return "\n".join([
         head(f"{title} · SCRUB", prefix, f"SCRUB documentation — {title}."),
         "<body>",
@@ -232,6 +251,7 @@ def doc_page(sec, slug, title, body, toc, prefix):
         "</div>",
         footer(prefix),
         f'<script src="{prefix}assets/app.js"></script>',
+        mermaid,
         "</body></html>",
     ])
 
@@ -388,7 +408,7 @@ def main():
     os.makedirs(os.path.join(DIST, "docs"))
     os.makedirs(os.path.join(DIST, "guides"))
 
-    for fn in ("styles.css", "app.js", "favicon.svg"):
+    for fn in ("styles.css", "app.js", "favicon.svg", "mermaid-init.js"):
         shutil.copy(os.path.join(ASSETS, fn), os.path.join(DIST, "assets", fn))
     write_pygments_css()
 
@@ -399,10 +419,10 @@ def main():
             srcpath = src if os.path.isabs(src) else os.path.join(ROOT, src)
             if src.startswith("../"):
                 srcpath = os.path.normpath(os.path.join(ROOT, src))
-            body, toc, h1 = md_to_html(srcpath)
+            body, toc, h1, has_mermaid = md_to_html(srcpath)
             prefix = relprefix(1)
             body = fix_abs(body, prefix)
-            page = doc_page(sec, slug, h1 or title, body, toc_html(toc, prefix), prefix)
+            page = doc_page(sec, slug, h1 or title, body, toc_html(toc, prefix), prefix, has_mermaid)
             with open(os.path.join(DIST, d, f"{slug}.html"), "w", encoding="utf-8") as f:
                 f.write(page)
             n += 1

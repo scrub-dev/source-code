@@ -53,9 +53,17 @@ scrub demo            # offline: mask → streamed echo → rehydrate, no networ
 
 ## The mental model
 
-```
-your app ──original──► SCRUB ──masked (⟦S:TYPE·id⟧)──► provider
-        ◄─rehydrated──        ◄──────────────────────
+```mermaid
+sequenceDiagram
+    participant App as Your app
+    participant S as SCRUB
+    participant P as LLM provider
+    App->>S: request (contains secrets / PII)
+    Note over S: detect → mask ⟦S:TYPE·id⟧
+    S->>P: masked request
+    P-->>S: streamed response (placeholders)
+    Note over S: rehydrate originals
+    S-->>App: rehydrated response
 ```
 
 - **Detect** secrets/PII on the configured request paths.

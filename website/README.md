@@ -36,6 +36,11 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 Cross-document links written as `FILENAME.md#anchor` are rewritten to site routes; links
 to other repo paths become GitHub `blob` links automatically.
 
+**Mermaid diagrams** — a ` ```mermaid ` fenced block in any Markdown source renders as a
+client-side diagram (theme-aware, follows light/dark). Mermaid is loaded from a pinned CDN
+**only on pages that contain a diagram**, so other pages stay JS-free. (GitHub also renders
+these blocks natively.)
+
 ## Deploy
 
 Pushing to `main` triggers `.github/workflows/pages.yml`, which builds and deploys to

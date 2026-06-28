@@ -174,6 +174,10 @@ pre.plain code { background: none; padding: 0; }
 .copy-btn { position: absolute; top: 8px; right: 8px; padding: 4px 9px; font-size: 12px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--background)); color: hsl(var(--muted-foreground)); cursor: pointer; opacity: 0; transition: opacity .15s; }
 .prose pre:hover .copy-btn { opacity: 1; }
 .copy-btn:hover { color: hsl(var(--foreground)); }
+.prose pre.mermaid { background: hsl(var(--muted) / .35); border: 1px solid hsl(var(--border)); display: flex; justify-content: center; padding: 22px; line-height: normal; }
+.prose pre.mermaid:not([data-processed]) { color: hsl(var(--muted-foreground)); font-size: 12px; }
+.prose pre.mermaid svg { max-width: 100%; height: auto; }
+.prose pre.mermaid .copy-btn { display: none; }
 
 /* ---------- footer ---------- */
 .footer { border-top: 1px solid hsl(var(--border)); margin-top: 24px; background: hsl(var(--muted) / .3); }

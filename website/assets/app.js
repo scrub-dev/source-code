@@ -21,8 +21,8 @@
     });
   }
 
-  // Copy buttons on code blocks.
-  document.querySelectorAll(".prose pre").forEach(function (pre) {
+  // Copy buttons on code blocks (not on mermaid diagrams).
+  document.querySelectorAll(".prose pre:not(.mermaid)").forEach(function (pre) {
     var b = document.createElement("button");
     b.className = "copy-btn"; b.type = "button"; b.textContent = "Copy";
     b.addEventListener("click", function () {
