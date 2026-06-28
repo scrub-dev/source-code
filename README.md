@@ -1,87 +1,181 @@
 # SCRUB
 
-**Secret Cleaning and Rehydration Utility Broker** — a single-binary forward proxy
-that **masks** secrets / PII / sensitive data on outbound requests to LLM providers and
-**rehydrates** (unmasks) it on the inbound response, including mid-stream. The provider
-only ever sees opaque placeholders; your users receive fully reconstituted responses.
+**Secret Cleaning and Rehydration Utility Broker** — a single-binary forward proxy that
+**masks** secrets / PII / sensitive data on outbound requests to LLM providers and
+**rehydrates** (unmasks) it on the inbound response, including mid-stream.
 
-See [`DESIGN.md`](DESIGN.md) for architecture, the reversibility contract, and the roadmap.
+The provider only ever sees opaque placeholders; your users receive fully reconstituted
+responses. SCRUB is not an LLM gateway for routing/cost — it owns the payload and guarantees
+a **lossless, reversible de-identification round trip**. The wedge is security & compliance
+(SOC 2, PCI-DSS, HIPAA, GDPR).
 
-## Status
+```
+        ┌────────┐   original    ┌────────┐   masked     ┌──────────┐
+client ─┤  app   ├──────────────►│ SCRUB  ├─────────────►│ LLM API  │
+        └────────┘  (secrets)    └────────┘ (⟦S:…⟧ ids)  └──────────┘
+            ▲  rehydrated            │ reverse map (in-mem / Redis)  │
+            └────────────────────────┴───────────────────────────────┘
+```
 
-**v0.1.0** — first pre-release. Full mask→upstream→rehydrate round trip with correct
-real-LLM streaming, sessions (in-mem + Redis, encrypted), multi-tenant policy, dry-run,
-tamper-evident audit, TLS termination + interception, and heuristic NER — verified
-end-to-end. Cloud secret-store connectors and media scanning are deferred until `1.0`
-(see [`DESIGN.md`](DESIGN.md) §8). See [`CHANGELOG.md`](CHANGELOG.md),
-[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md), and [`SECURITY.md`](SECURITY.md).
+- **Docs:** [Configuration](docs/CONFIGURATION.md) · [Deployment & Ops](docs/DEPLOYMENT.md) ·
+  [Security & Threat Model](SECURITY.md) · [Design](DESIGN.md) · [Changelog](CHANGELOG.md)
+- **Example config:** [`scrub.example.yaml`](scrub.example.yaml) ·
+  **Curated rules:** [`examples/common-rules.yaml`](examples/common-rules.yaml)
 
-Implemented:
-- Sentinel grammar (`⟦S:TYPE·id⟧`) with reverse-table indices — the secret never leaves SCRUB.
-- Config-driven detection: glossary (Aho-Corasick) + regex rules, deterministic overlap resolution.
-- Provider-aware **scan paths** (`messages[].content`, …) — mask only content, not metadata.
-- Egress masking with per-request dedup and `zeroize`-on-drop vault.
-- **Streaming rehydration state machine** — correct at every chunk boundary (tested byte-by-byte),
-  JSON-string-safe so a spliced original can't break the SSE/JSON frame.
-- **SSE-aware rehydration** — a sentinel fragmented across `data:` delta events (real LLM
-  streaming) reassembles via per-event content rehydration (`stream_paths`).
-- **Async proxy**: route matching to upstream URLs, request masking, streamed response rehydration.
-- **Secret sources**: `.env`, secret-file, and **HashiCorp Vault** (KV v2) ingestion feeding
-  the same masking automaton. Curated rules for common token/key formats in
+---
+
+## How it works
+
+1. **Detect** — on the request, SCRUB scans the configured JSON content paths
+   (`messages[].content`, …) using a glossary (Aho-Corasick), a single-pass regex
+   meta-engine, an optional entropy catcher, secret-store values, and an optional
+   heuristic NER.
+2. **Mask** — each detected span is replaced by a reversible **sentinel** `⟦S:TYPE·id⟧`.
+   The `id` indexes a reverse table held only in SCRUB; the secret never leaves. Equal
+   originals dedupe to the same id (stable pseudonyms).
+3. **Forward** — the masked request goes to the configured upstream.
+4. **Rehydrate** — as the response streams back, SCRUB splices the originals back in. It is
+   correct at every byte boundary and **reassembles a sentinel fragmented across SSE
+   `data:` events** (real LLM token streaming).
+5. **Wipe** — request-scoped reverse maps are `zeroize`d at response end; session maps
+   expire by TTL.
+
+The reverse table is per-request by default, or **per-session** (stable pseudonyms across a
+multi-turn conversation), backed by memory or Redis.
+
+---
+
+## Quick start
+
+```sh
+cargo run --bin scrub -- --config scrub.yaml --listen 127.0.0.1:8080
+```
+
+```yaml
+# scrub.yaml
+routes:
+  - { listen_path: "/openai", upstream: "https://api.openai.com", profile: openai }
+profiles:
+  openai:
+    scan_paths:   ["messages[].content"]
+    stream_paths: ["choices[].delta.content"]   # required for streaming responses
+rules:
+  - { name: email, type: EMAIL, pattern: '[\w.+-]+@[\w.-]+\.\w+', priority: 50 }
+```
+
+Point your app at `http://scrub:8080/openai/v1/chat/completions`. The upstream sees masked
+content; your app gets the rehydrated stream. Start with `masking.mode: dry-run` to validate
+detection coverage before enforcing.
+
+```sh
+cargo run --bin scrub demo            # offline mask → streamed echo → rehydrate
+cargo run --bin scrub -- --version
+cargo test                            # 73 tests
+```
+
+---
+
+## Features
+
+### Detection
+- **Glossary** (literal terms) and **regex rules** compiled into one `regex-automata`
+  meta-engine — a single pass whose cost is ~flat in rule count.
+- **Curated ruleset** for popular secret formats (AWS/GCP/DigitalOcean keys; GitHub/GitLab/
+  Slack/Stripe/SendGrid/Twilio/npm/OpenAI/Anthropic tokens; JWTs; PEM private keys;
+  credential URLs; bearer tokens; generic assignments) in
   [`examples/common-rules.yaml`](examples/common-rules.yaml).
-- **Hot-reload**: config + watched source files recompile and swap atomically (`arc-swap`); a
-  bad edit keeps the last good config. No restart needed.
-- **Session scope**: shared per-session vault keyed by a request header → stable pseudonyms
-  across a multi-turn conversation, with TTL-based eviction (secrets zeroized on evict).
-- **Dry-run mode**: detect and report (`x-scrub-detected: EMAIL=2` header, counts/types only)
-  while forwarding the original upstream — for onboarding/compliance trust before enforcing.
-- **Entropy detector**: flags high-entropy token-like secrets no named rule covers (opt-in).
-- **NER/PII detector**: heuristic person-name detection behind a pluggable `SpanDetector`
-  seam (a model-backed detector can slot in later via the same trait); opt-in.
-- **Per-route policy**: each route can override the global mode/scope/style (e.g. dry-run a canary).
-- **Proxy auth**: optional API-key gate on the proxy itself; the key is never forwarded upstream.
-- **Multi-tenant**: a client key maps to a tenant with its own policy, private glossary, and
+- **Entropy detector** for high-entropy secrets no named rule covers (opt-in).
+- **Heuristic NER** for person-name PII behind a pluggable `SpanDetector` seam (opt-in;
+  a model-backed detector can replace it via the same trait).
+- **Secret sources** feed values into detection at startup/reload: `.env`, secret files,
+  and **HashiCorp Vault** (KV v2).
+- **Provider-aware scan paths** — mask only content, never `model`/metadata. Deterministic
+  overlap resolution by priority.
+
+### Masking & rehydration
+- Reversible **sentinel** masking with reverse-table indices (secret never leaves SCRUB).
+- **Streaming rehydration** state machine — lossless at every chunk boundary, JSON-string-safe.
+- **SSE-aware rehydration** — reassembles sentinels fragmented across delta events
+  (`stream_paths`).
+- Per-request **dedup**; `zeroize`-on-drop vault.
+
+### Sessions
+- **Request scope** (default) or **session scope** (stable pseudonyms across a conversation,
+  keyed by a request header), TTL-evicted.
+- Backends: **in-memory** (single node) or **Redis** (cross-node). Each node gets a
+  disjoint id space and writes per-field Redis hashes, so concurrent nodes never collide
+  ids or lose entries. Stored vaults are **encrypted at rest** (AES-256-GCM) with an
+  `encryption_key`.
+
+### Policy & multi-tenancy
+- **Dry-run mode** — detect and report (`x-scrub-detected` header) while forwarding the
+  original, for onboarding/compliance trust.
+- **Per-route policy** overrides (mode/scope/style) — e.g. dry-run a canary route.
+- **Multi-tenant** — a client key → tenant with its own policy, private glossary, and
   isolated session namespace (tenant > route > global precedence).
-- **Cross-node sessions**: pluggable session backend — in-memory (single node) or Redis, so a
-  session started on one node rehydrates on another. Each node gets a **disjoint id space**
-  and writes **per-field Redis hashes**, so concurrent nodes never collide ids or lose entries.
-  Stored vaults are **encrypted at rest** (AES-256-GCM) when an `encryption_key` is set.
-- **Tamper-evident audit**: hash-chained JSONL of detections (counts/types, never values);
-  any edit/deletion breaks the chain. Verify with `scrub audit-verify <path>`.
-- **Transaction log**: full per-request JSONL of the *masked* provider-facing request/response
-  (correlation id via `x-scrub-request-id`) — auditable, secret-free in enforce mode.
-- **Hardened auth**: API keys compared in constant time; unauthenticated `/healthz` liveness.
-- **TLS termination**: serve clients over HTTPS (rustls + `ring`, no OpenSSL/aws-lc).
-- **TLS interception (MITM)**: mints a per-host cert on the fly from a configured CA and masks
-  intercepted HTTPS — in **SNI-transparent** or **CONNECT-proxy** mode (clients trust the CA).
-- Provider-agnostic config (`routes` -> upstream URLs), criterion benches.
+
+### Security
+- **Proxy auth** — optional API-key gate, compared in **constant time**; the key is never
+  forwarded upstream. Unauthenticated `/healthz`.
+- **TLS termination** — serve clients over HTTPS.
+- **TLS interception (MITM)** — mint a per-host cert on the fly from a configured CA and
+  mask any intercepted HTTPS, in **SNI-transparent** or **CONNECT-proxy** mode.
+- rustls + `ring` throughout — no OpenSSL/aws-lc.
+
+### Auditing
+- **Tamper-evident audit log** — hash-chained JSONL of detections (counts/types, never
+  values); `scrub audit-verify <path>` detects any edit/deletion.
+- **Transaction log** — full per-request JSONL of the *masked* provider-facing request and
+  response, with a `x-scrub-request-id` correlation id; secret-free in enforce mode.
+
+### Operations
+- **Hot-reload** — config + watched secret files recompile and swap atomically; a bad edit
+  keeps the last good config.
+- **Single static binary**, multi-arch; **container** image.
+
+---
+
+## Configuration
+
+The full reference is in [docs/CONFIGURATION.md](docs/CONFIGURATION.md); the annotated
+example is [`scrub.example.yaml`](scrub.example.yaml). Top-level sections:
+
+| Section | Purpose |
+|---------|---------|
+| `routes[]` | inbound `listen_path` (or `host` for interception) → `upstream` + `profile` + optional policy |
+| `profiles{}` | `scan_paths` (request) / `stream_paths` (SSE response) per provider |
+| `masking` | global `mode` / `style` / `scope` / `ttl` / `session_header` |
+| `rules[]`, `glossary[]`, `entropy`, `ner` | detection |
+| `sources[]` | `.env` / secret-file / Vault ingestion |
+| `auth`, `tenants[]` | proxy authentication and multi-tenant policy |
+| `sessions` | `memory` / `redis` backend, `encryption_key`, `node_id` |
+| `tls`, `intercept` | TLS termination / interception |
+| `audit`, `transactions` | tamper-evident + full transaction logging |
+
+**CLI:** `--config <path>`, `--listen <addr>`, `--version`, `demo`, `audit-verify <path>`.
+**Env:** `SCRUB_CONFIG`, `SCRUB_LISTEN`, `RUST_LOG`, `VAULT_TOKEN`.
+
+---
 
 ## Layout
 
 ```
 crates/
-  scrub-core/   engine: config, detect, mask, scan, ner, rehydrate, sentinel, vault  (+ benches)
-  scrub/        binary + lib: proxy (listener/router), secrets (.env/file), reload (watcher),
-                session (backends/TTL), redis_backend, crypto (at-rest), audit, mitm (cert minter), demo CLI
+  scrub-core/   I/O-free engine: config, detect, mask, scan, ner, rehydrate, sentinel, vault  (+ benches)
+  scrub/        binary + lib:
+                proxy (listener/router/forward), connect (CONNECT-proxy MITM),
+                mitm (cert minter), secrets (.env/file/Vault), reload (watcher),
+                session (backends/TTL), redis_backend, crypto (at-rest),
+                audit (hash chain), transactions (request/response log), demo CLI
+examples/       common-rules.yaml, …
+docs/           CONFIGURATION.md, DEPLOYMENT.md
 ```
 
-## Try it
+---
 
-```sh
-cargo test                          # 65 tests incl. split-sentinel, e2e proxy, reload, session,
-                                    # dry-run, auth, tenant, cross-node, crypto, audit, TLS+MITM, NER, SSE-stream, soak
-cargo run --bin scrub demo          # offline mask -> streamed echo -> rehydrate
-cargo run --bin scrub -- --config scrub.example.yaml --listen 127.0.0.1:8080
-cargo bench                         # mask / rehydrate throughput
-```
+## Build & release
 
-Point a client at `http://127.0.0.1:8080/<route>/…` (e.g. `/openai/v1/chat/completions`);
-SCRUB masks the request, forwards to the route's upstream, and rehydrates the streamed
-response. Configuration: see [`scrub.example.yaml`](scrub.example.yaml).
-
-## Release builds
-
-Single static binary, no OpenSSL (rustls + `ring`). Build all platforms with
+Static single binary, no OpenSSL (rustls + `ring`). Build all platforms with
 `scripts/build-release.sh` (skips targets whose toolchain isn't installed), or via the
 `Release` GitHub workflow on a `v*` tag. Supported targets:
 
@@ -91,3 +185,18 @@ Single static binary, no OpenSSL (rustls + `ring`). Build all platforms with
 | Linux (musl, static) | ✓ | ✓ |
 | macOS | ✓ | ✓ |
 | Windows | ✓ (msvc/gnu) | — |
+
+Container: `docker build -t scrub . && docker run --rm -p 8080:8080 \
+-v "$PWD/scrub.yaml:/etc/scrub/scrub.yaml:ro" scrub --config /etc/scrub/scrub.yaml`.
+
+---
+
+## Status
+
+Pre-`1.0`. Feature-complete against the buildable roadmap (see [DESIGN §8](DESIGN.md)).
+Deferred until `1.0`: AWS/GCP secret-manager connectors and media (image/audio) scanning —
+the `SecretSource` and `SpanDetector` seams are already in place for them.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE). Report security issues per [SECURITY.md](SECURITY.md).
