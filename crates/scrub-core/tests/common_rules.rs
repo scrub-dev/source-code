@@ -4,10 +4,27 @@
 use scrub_core::{Config, Detector};
 
 const RULES: &str = include_str!("../../../examples/common-rules.yaml");
+const PROXY: &str = include_str!("../../../examples/proxy.yaml");
 
 fn detector() -> Detector {
     let cfg = Config::from_yaml(RULES).expect("common-rules.yaml parses");
     Detector::from_config(&cfg).expect("all patterns compile")
+}
+
+#[test]
+fn proxy_example_is_valid() {
+    let cfg = Config::from_yaml(PROXY).expect("proxy.yaml parses");
+    assert!(
+        cfg.intercept.enabled && cfg.intercept.connect,
+        "CONNECT-proxy mode"
+    );
+    assert!(
+        cfg.routes
+            .iter()
+            .any(|r| r.host.as_deref() == Some("api.openai.com")),
+        "host-routed entries"
+    );
+    Detector::from_config(&cfg).expect("proxy.yaml patterns compile");
 }
 
 /// Return the entity types detected in `input`.

@@ -18,9 +18,11 @@ client ─┤  app   ├──────────────►│ SCRUB  
 ```
 
 - **Docs:** [Configuration](docs/CONFIGURATION.md) · [Deployment & Ops](docs/DEPLOYMENT.md) ·
-  [Security & Threat Model](SECURITY.md) · [Design](DESIGN.md) · [Changelog](CHANGELOG.md)
-- **Example config:** [`scrub.example.yaml`](scrub.example.yaml) ·
-  **Curated rules:** [`examples/common-rules.yaml`](examples/common-rules.yaml)
+  [Use as an HTTP proxy](docs/HTTP-PROXY.md) · [Security & Threat Model](SECURITY.md) ·
+  [Design](DESIGN.md) · [Changelog](CHANGELOG.md)
+- **Example configs:** [`scrub.example.yaml`](scrub.example.yaml) ·
+  [`examples/proxy.yaml`](examples/proxy.yaml) (HTTP-proxy) ·
+  [`examples/common-rules.yaml`](examples/common-rules.yaml) (curated rules)
 
 ---
 
@@ -66,6 +68,10 @@ rules:
 Point your app at `http://scrub:8080/openai/v1/chat/completions`. The upstream sees masked
 content; your app gets the rehydrated stream. Start with `masking.mode: dry-run` to validate
 detection coverage before enforcing.
+
+Prefer to set SCRUB as your **OS/app HTTP proxy** (no base-URL change)? See
+[docs/HTTP-PROXY.md](docs/HTTP-PROXY.md) — `./scripts/setup-ca.sh ca` then
+`scrub --config examples/proxy.yaml`.
 
 ```sh
 cargo run --bin scrub demo            # offline mask → streamed echo → rehydrate

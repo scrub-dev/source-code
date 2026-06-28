@@ -81,6 +81,10 @@ tls:
      (`HTTPS_PROXY=http://scrub:8443`). SCRUB MITMs configured hosts and
      blind-tunnels everything else untouched.
 
+> For a complete "use SCRUB as your OS HTTP proxy" walkthrough (CA setup script,
+> trust-store install per OS, a ready-to-run config), see
+> [HTTP-PROXY.md](HTTP-PROXY.md).
+
 > The CA key can mint a cert for any host — restrict file permissions, keep it off
 > shared storage, and rotate it. Use `intercept.upstream_ca_path` to trust an
 > internal CA on the upstream side.

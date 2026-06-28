@@ -4,6 +4,14 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/) once it reaches `1.0`.
 
+## [Unreleased]
+
+### Added
+- **HTTP-proxy quickstart**: `docs/HTTP-PROXY.md` (use SCRUB as your OS/app HTTP
+  proxy), a ready-to-run `examples/proxy.yaml` (CONNECT-proxy interception for
+  OpenAI/Anthropic/Gemini/Mistral wired to the curated ruleset), and
+  `scripts/setup-ca.sh` (generate + OS-trust an interception CA).
+
 ## [0.3.3] — 2026-06-28
 
 ### CI/CD
