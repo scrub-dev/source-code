@@ -53,11 +53,25 @@ ha:
     minAvailable: 1
     # maxUnavailable: ""
 
-# Redis backing the shared session store (used when ha.enabled). The chart does
-# not deploy Redis — point this at your own (e.g. the Bitnami redis chart, or a
-# managed service). Use rediss:// + AUTH in production.
+# Redis backing the shared session store (used when ha.enabled). Either deploy
+# the bundled single-instance Redis (turnkey) or point `url` at your own
+# (managed / clustered Redis — recommended for production; use rediss:// + AUTH).
 redis:
+  # Deploy a bundled single-instance Redis (dependency-free; official image).
+  enabled: false
+  # External Redis URL. Takes precedence over the bundled instance when set.
   url: ""                  # e.g. rediss://scrub:pass@redis:6379/0
+  # --- bundled instance (used when enabled=true and url is empty) ---
+  image: redis:7.4-alpine
+  password: ""             # optional AUTH (rendered into a Secret + requirepass)
+  existingSecret: ""       # or a Secret with key 'redis-password' for the server
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  persistence:
+    enabled: false         # false = ephemeral emptyDir
+    size: 1Gi
+    storageClass: ""
 
 sessions:
   # At-rest AES-256-GCM key for stored session vaults (strongly recommended in HA).

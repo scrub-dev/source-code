@@ -212,11 +212,15 @@ probes. `helm test scrub` runs a health smoke test.
 ### High availability
 
 ```sh
+# Turnkey: bundle a single Redis (dependency-free, official image).
 helm install scrub oci://ghcr.io/scrub-dev/charts/scrub --version X.Y.Z \
   --set ha.enabled=true --set replicaCount=3 \
-  --set redis.url=rediss://scrub:pass@redis:6379/0 \
+  --set redis.enabled=true --set redis.password=<secret> \
   --set sessions.encryptionKey=<high-entropy secret> \
   --set config.masking.scope=session
+
+# Production: point at your own managed / clustered Redis instead.
+#   --set redis.url=rediss://scrub:pass@redis:6379/0   (omit redis.enabled)
 ```
 
 `ha.enabled` switches the workload to a **StatefulSet** so each pod gets a stable
@@ -226,9 +230,13 @@ at rest with your key. The chart also adds a **PodDisruptionBudget** and soft
 **anti-affinity**; set `autoscaling.enabled=true` for an HPA. The topology matches
 the diagram in [High availability](#high-availability-multi-node) above.
 
+The session store is either the **bundled Redis** (`redis.enabled=true`, with optional
+`redis.persistence.enabled`) or an **external** one (`redis.url`); the Redis URL and
+at-rest key are kept in a Secret and injected via `secretKeyRef`. See the
+[Deploy on Kubernetes guide](https://github.com/scrub-dev/source-code/blob/main/website/content/guides/kubernetes.md)
+for the full walkthrough.
+
 > Requires Kubernetes ≥ 1.28 (the `apps.kubernetes.io/pod-index` downward-API label).
-> The chart does not deploy Redis — point `redis.url` at your own (managed, or the
-> Bitnami `redis` chart).
 
 The same wiring works **without Helm** via environment variables that override the
 config's `sessions` block — handy for any orchestrator:

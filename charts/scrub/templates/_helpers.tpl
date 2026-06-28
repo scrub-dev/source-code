@@ -61,3 +61,26 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "scrub.hasEncryptionKey" -}}
 {{- if or .Values.sessions.encryptionKey .Values.sessions.existingSecret -}}true{{- end -}}
 {{- end -}}
+
+{{/* Name/host of the bundled Redis. */}}
+{{- define "scrub.redisFullname" -}}
+{{- printf "%s-redis" (include "scrub.fullname" .) -}}
+{{- end -}}
+
+{{/* Secret holding the bundled Redis server password. */}}
+{{- define "scrub.redisSecretName" -}}
+{{- default (printf "%s-redis" (include "scrub.fullname" .)) .Values.redis.existingSecret -}}
+{{- end -}}
+
+{{/* Effective Redis URL: explicit external url wins, else the bundled instance. */}}
+{{- define "scrub.redisUrl" -}}
+{{- if .Values.redis.url -}}
+{{- .Values.redis.url -}}
+{{- else if .Values.redis.enabled -}}
+{{- if .Values.redis.password -}}
+redis://:{{ .Values.redis.password }}@{{ include "scrub.redisFullname" . }}:6379/0
+{{- else -}}
+redis://{{ include "scrub.redisFullname" . }}:6379/0
+{{- end -}}
+{{- end -}}
+{{- end -}}

@@ -34,6 +34,7 @@ NAV = {
         ("why-scrub", "Why SCRUB?", "content/guides/why-scrub.md"),
         ("rules", "Detection & Masking", "content/guides/rules.md"),
         ("http-proxy", "Use as an HTTP Proxy", "../docs/HTTP-PROXY.md"),
+        ("kubernetes", "Deploy on Kubernetes", "content/guides/kubernetes.md"),
     ],
     "Reference": [
         ("configuration", "Configuration", "../docs/CONFIGURATION.md"),

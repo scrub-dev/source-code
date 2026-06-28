@@ -1,3 +1,6 @@
+{{- if and .Values.ha.enabled (not .Values.sessions.existingSecret) (not (include "scrub.redisUrl" .)) }}
+{{- fail "ha.enabled needs a shared session store: set redis.enabled=true, or redis.url, or sessions.existingSecret" }}
+{{- end }}
 apiVersion: apps/v1
 kind: {{ ternary "StatefulSet" "Deployment" .Values.ha.enabled }}
 metadata:
@@ -84,16 +87,32 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
-            {{- if .Values.redis.url }}
+            {{- if .Values.sessions.existingSecret }}
             - name: SCRUB_REDIS_URL
-              value: {{ .Values.redis.url | quote }}
-            {{- end }}
-            {{- if include "scrub.hasEncryptionKey" . }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.sessions.existingSecret }}
+                  key: redis-url
             - name: SCRUB_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "scrub.secretName" . }}
+                  name: {{ .Values.sessions.existingSecret }}
                   key: encryption-key
+            {{- else }}
+            {{- if include "scrub.redisUrl" . }}
+            - name: SCRUB_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-env" (include "scrub.fullname" .) }}
+                  key: redis-url
+            {{- end }}
+            {{- if .Values.sessions.encryptionKey }}
+            - name: SCRUB_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-env" (include "scrub.fullname" .) }}
+                  key: encryption-key
+            {{- end }}
             {{- end }}
             {{- end }}
             {{- with .Values.extraEnv }}

@@ -63,3 +63,8 @@ jobs:
             --set redis.url=rediss://r:6379 --set sessions.encryptionKey=k \
             --set autoscaling.enabled=true \
             | kubeconform -strict -ignore-missing-schemas -summary
+          helm template scrub charts/scrub \
+            --set ha.enabled=true --set replicaCount=3 \
+            --set redis.enabled=true --set redis.password=pw \
+            --set redis.persistence.enabled=true --set sessions.encryptionKey=k \
+            | kubeconform -strict -ignore-missing-schemas -summary

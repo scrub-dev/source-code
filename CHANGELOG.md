@@ -4,6 +4,15 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/) once it reaches `1.0`.
 
+## [Unreleased]
+
+### Added
+- **Bundled Redis option** for the Helm chart (`redis.enabled=true`): a turnkey,
+  dependency-free single Redis (official image, optional persistence) for HA, with
+  the Redis URL + at-rest key kept in a Secret and injected via `secretKeyRef`.
+  External/managed Redis (`redis.url`) remains the production path.
+- **"Deploy on Kubernetes" guide** on the docs website.
+
 ## [0.4.0] — 2026-06-28
 
 ### Added

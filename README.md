@@ -20,8 +20,8 @@ client ─┤  app   ├──────────────►│ SCRUB  
 - **Website:** a generated docs/guides site lives in [`website/`](website/) (shadcn-styled,
   static, deployed to GitHub Pages).
 - **Docs:** [Configuration](docs/CONFIGURATION.md) · [Deployment & Ops](docs/DEPLOYMENT.md) ·
-  [Use as an HTTP proxy](docs/HTTP-PROXY.md) · [Security & Threat Model](SECURITY.md) ·
-  [Design](DESIGN.md) · [Changelog](CHANGELOG.md)
+  [Use as an HTTP proxy](docs/HTTP-PROXY.md) · [Kubernetes (Helm)](docs/DEPLOYMENT.md#kubernetes-helm) ·
+  [Security & Threat Model](SECURITY.md) · [Design](DESIGN.md) · [Changelog](CHANGELOG.md)
 - **Example configs:** [`scrub.example.yaml`](scrub.example.yaml) ·
   [`examples/proxy.yaml`](examples/proxy.yaml) (HTTP-proxy) ·
   [`examples/common-rules.yaml`](examples/common-rules.yaml) (curated rules)

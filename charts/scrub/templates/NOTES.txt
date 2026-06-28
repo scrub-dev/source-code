@@ -12,10 +12,13 @@ Health:  /healthz   |   Masking mode: {{ .Values.config.masking.mode | default "
 
 HA: each pod receives a distinct node id from its ordinal (SCRUB_NODE_ID), and
 shares session state via Redis.
-{{- if not .Values.redis.url }}
+{{- if and .Values.redis.enabled (not .Values.redis.url) }}
 
-  ⚠  redis.url is empty — set it to your Redis (rediss://… recommended), e.g.
-     --set redis.url=rediss://scrub:pass@redis-master:6379/0
+  Session store: bundled Redis ({{ include "scrub.redisFullname" . }}:6379{{ if not .Values.redis.persistence.enabled }}, ephemeral{{ end }}).
+  For production, prefer an external/managed Redis via redis.url.
+{{- else if .Values.redis.url }}
+
+  Session store: external Redis (redis.url).
 {{- end }}
 {{- if not (include "scrub.hasEncryptionKey" .) }}
 
