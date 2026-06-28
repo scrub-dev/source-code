@@ -4,7 +4,7 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/) once it reaches `1.0`.
 
-## [Unreleased]
+## [0.4.0] — 2026-06-28
 
 ### Added
 - **Helm chart** (`charts/scrub`), published as an **OCI artifact** to GHCR on each
@@ -121,6 +121,7 @@ including across streamed responses.
 - Media (image/audio) scanning — the `Detector`/`Span` seam is in place.
 - CONNECT-proxy MITM mode (current interception is SNI-transparent).
 
+[0.4.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.4.0
 [0.3.3]: https://github.com/scrub-dev/scrub/releases/tag/v0.3.3
 [0.3.2]: https://github.com/scrub-dev/scrub/releases/tag/v0.3.2
 [0.3.1]: https://github.com/scrub-dev/scrub/releases/tag/v0.3.1
