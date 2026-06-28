@@ -4,7 +4,7 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/) once it reaches `1.0`.
 
-## [Unreleased]
+## [0.3.0] — 2026-06-28
 
 ### Added
 - **Request/response transaction log** (`transactions.enabled`): one JSON line per
@@ -20,6 +20,9 @@ All notable changes to SCRUB are documented here. The format follows
   tokens, Slack/Stripe/SendGrid/Twilio/npm/OpenAI/Anthropic tokens, JWTs, PEM
   private keys, credential URLs, bearer tokens, and generic assignments — plus a
   high-entropy catcher. Validated by tests.
+
+### Docs
+- Comprehensive README and a full configuration reference (`docs/CONFIGURATION.md`).
 
 ## [0.2.0] — 2026-06-28
 
@@ -74,5 +77,6 @@ including across streamed responses.
 - Media (image/audio) scanning — the `Detector`/`Span` seam is in place.
 - CONNECT-proxy MITM mode (current interception is SNI-transparent).
 
+[0.3.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.3.0
 [0.2.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.2.0
 [0.1.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.1.0
