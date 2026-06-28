@@ -166,10 +166,14 @@ Env: `SCRUB_CONFIG`, `SCRUB_LISTEN`, `RUST_LOG`. CLI: `--config`, `--listen`,
 
 ## Containers
 
-A multi-stage `Dockerfile` builds a static (musl) binary into a minimal image:
+Each release publishes a **multi-arch (amd64 + arm64)** image to GHCR, packaging
+the static musl binary into a minimal `scratch` image:
 
 ```sh
-docker build -t scrub:0.1.0 .
 docker run --rm -p 8080:8080 -v "$PWD/scrub.yaml:/etc/scrub/scrub.yaml:ro" \
-  scrub:0.1.0 --config /etc/scrub/scrub.yaml --listen 0.0.0.0:8080
+  ghcr.io/scrub-dev/scrub:latest --config /etc/scrub/scrub.yaml --listen 0.0.0.0:8080
 ```
+
+Tags: `:latest` and `:vX.Y.Z`. To build from source locally instead, the
+multi-stage `Dockerfile` compiles a static binary into a minimal image:
+`docker build -t scrub .`.

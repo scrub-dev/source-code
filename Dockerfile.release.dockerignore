@@ -1,0 +1,4 @@
+# Build context for Dockerfile.release: only the staged binaries under dist/.
+# (BuildKit uses <dockerfile>.dockerignore in preference to .dockerignore.)
+*
+!dist

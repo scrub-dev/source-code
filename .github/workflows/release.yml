@@ -113,8 +113,10 @@ jobs:
           gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file NOTES.md
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" dist/SHA256SUMS --clobber
 
-  # Build and publish the container image to GitHub Container Registry.
+  # Build and publish a multi-arch (amd64 + arm64) container image to GHCR,
+  # packaging the static musl binaries from the build matrix (no in-image build).
   image:
+    needs: build
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -122,6 +124,22 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - name: Stage release binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p tmp dist/amd64 dist/arm64
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --pattern "scrub-*-x86_64-unknown-linux-musl.tar.gz" --dir tmp
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --pattern "scrub-*-aarch64-unknown-linux-musl.tar.gz" --dir tmp
+          tar -xzf tmp/scrub-*-x86_64-unknown-linux-musl.tar.gz -C tmp
+          tar -xzf tmp/scrub-*-aarch64-unknown-linux-musl.tar.gz -C tmp
+          cp tmp/scrub-*-x86_64-unknown-linux-musl/scrub  dist/amd64/scrub
+          cp tmp/scrub-*-aarch64-unknown-linux-musl/scrub dist/arm64/scrub
+          chmod +x dist/amd64/scrub dist/arm64/scrub
+      - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -130,6 +148,8 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.release
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/scrub:${{ github.ref_name }}

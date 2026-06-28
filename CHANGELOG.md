@@ -4,6 +4,13 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/) once it reaches `1.0`.
 
+## [0.3.2] — 2026-06-28
+
+### CI/CD
+- **Multi-arch container image**: the release now publishes a `linux/amd64` +
+  `linux/arm64` image to GHCR (`ghcr.io/scrub-dev/scrub:<tag>` + `:latest`),
+  packaging the prebuilt static musl binaries (no in-image compilation).
+
 ## [0.3.1] — 2026-06-28
 
 ### CI/CD
@@ -87,6 +94,7 @@ including across streamed responses.
 - Media (image/audio) scanning — the `Detector`/`Span` seam is in place.
 - CONNECT-proxy MITM mode (current interception is SNI-transparent).
 
+[0.3.2]: https://github.com/scrub-dev/scrub/releases/tag/v0.3.2
 [0.3.1]: https://github.com/scrub-dev/scrub/releases/tag/v0.3.1
 [0.3.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.3.0
 [0.2.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.2.0

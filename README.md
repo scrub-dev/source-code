@@ -186,8 +186,14 @@ Static single binary, no OpenSSL (rustls + `ring`). Build all platforms with
 | macOS | ✓ | ✓ |
 | Windows | ✓ (msvc/gnu) | — |
 
-Container: `docker build -t scrub . && docker run --rm -p 8080:8080 \
--v "$PWD/scrub.yaml:/etc/scrub/scrub.yaml:ro" scrub --config /etc/scrub/scrub.yaml`.
+**Container** — a multi-arch (amd64 + arm64) image is published on each release:
+
+```sh
+docker run --rm -p 8080:8080 -v "$PWD/scrub.yaml:/etc/scrub/scrub.yaml:ro" \
+  ghcr.io/scrub-dev/scrub:latest --config /etc/scrub/scrub.yaml --listen 0.0.0.0:8080
+```
+
+Or build from source locally: `docker build -t scrub .`.
 
 ---
 

@@ -1,0 +1,16 @@
+# Multi-arch release image: copies the pre-built static musl binary for the
+# target platform into a minimal scratch image. No compilation/emulation — the
+# binary is produced by the release build matrix and staged under dist/<arch>/.
+#
+# Built via `docker buildx --platform linux/amd64,linux/arm64`; `TARGETARCH`
+# (amd64 | arm64) selects the right binary. For a from-source local build use
+# the plain `Dockerfile` instead.
+
+FROM scratch
+ARG TARGETARCH
+COPY dist/${TARGETARCH}/scrub /scrub
+# Non-root numeric UID (no user db in scratch).
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/scrub"]
+CMD ["--config", "/etc/scrub/scrub.yaml", "--listen", "0.0.0.0:8080"]
