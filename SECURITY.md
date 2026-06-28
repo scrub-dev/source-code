@@ -16,8 +16,7 @@ reasonable window before public disclosure.
 
 ## Supported versions
 
-SCRUB is pre-`1.0`. Only the latest `0.x` release receives security fixes until
-`1.0` ships.
+The latest `1.x` release receives security fixes.
 
 ## Threat model
 
@@ -62,7 +61,7 @@ secret sources, or (for the Redis backend) the session store can see secrets.
   (a leak) is worse than a false positive (a degraded prompt).
 - Rotate auth keys and the interception CA on a schedule.
 
-### Known limitations (as of 0.1.0)
+### Known limitations (as of 1.0)
 - Auth keys are static (no built-in rotation/expiry).
 - The heuristic NER is **not** a trained model; it favors precision and will miss
   many names. Use it as defense-in-depth, not a sole PII control.

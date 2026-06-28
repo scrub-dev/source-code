@@ -78,7 +78,7 @@ Prefer to set SCRUB as your **OS/app HTTP proxy** (no base-URL change)? See
 ```sh
 cargo run --bin scrub demo            # offline mask → streamed echo → rehydrate
 cargo run --bin scrub -- --version
-cargo test                            # 73 tests
+cargo test                            # full test suite
 ```
 
 ---
@@ -216,9 +216,11 @@ See [Deployment → Kubernetes](docs/DEPLOYMENT.md#kubernetes-helm).
 
 ## Status
 
-Pre-`1.0`. Feature-complete against the buildable roadmap (see [DESIGN §8](DESIGN.md)).
-Deferred until `1.0`: AWS/GCP secret-manager connectors and media (image/audio) scanning —
-the `SecretSource` and `SpanDetector` seams are already in place for them.
+**`1.0` — production release.** Feature-complete against the buildable roadmap
+(see [DESIGN §8](DESIGN.md)); the public API and config schema follow
+[Semantic Versioning](https://semver.org/) from here. Post-`1.0` roadmap: AWS/GCP
+secret-manager connectors and media (image/audio) scanning — the `SecretSource` and
+`SpanDetector` seams are already in place for them.
 
 ## License
 

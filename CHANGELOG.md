@@ -1,8 +1,30 @@
 # Changelog
 
 All notable changes to SCRUB are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
-[Semantic Versioning](https://semver.org/) once it reaches `1.0`.
+[Keep a Changelog](https://keepachangelog.com/), and the project follows
+[Semantic Versioning](https://semver.org/).
+
+## [1.0.0] — 2026-06-28
+
+First production release. SCRUB is a single-binary forward proxy that masks
+secrets / PII / sensitive data on outbound LLM-provider requests and rehydrates
+them on responses (including streaming). The `0.x` entries below built up to this;
+from `1.0` the public CLI, config schema, and chart values follow SemVer.
+
+### Highlights
+- **Engine**: reversible sentinel masking (`⟦S:TYPE·id⟧`), single-pass detection
+  (glossary + regex meta-engine + entropy + heuristic NER), provider-aware scan
+  paths, and streaming/SSE-correct rehydration.
+- **Secret sources**: `.env`, file, and HashiCorp Vault (KV v2); a curated ruleset.
+- **Sessions**: request- or session-scoped pseudonyms; in-memory or Redis backend
+  with node-disjoint ids and AES-256-GCM at-rest encryption.
+- **Policy**: dry-run, per-route overrides, multi-tenant isolation, constant-time auth.
+- **Transport**: TLS termination and interception (SNI-transparent + CONNECT proxy)
+  with on-the-fly per-host certs; usable as an OS HTTP proxy.
+- **Auditing**: tamper-evident hash-chained audit log + full (masked) transaction log.
+- **Delivery**: static multi-arch binaries, a multi-arch container image, and a
+  Helm chart (single-node + HA StatefulSet/Redis) published as an OCI artifact;
+  a documentation website.
 
 ## [0.4.2] — 2026-06-28
 
@@ -141,6 +163,7 @@ including across streamed responses.
 - Media (image/audio) scanning — the `Detector`/`Span` seam is in place.
 - CONNECT-proxy MITM mode (current interception is SNI-transparent).
 
+[1.0.0]: https://github.com/scrub-dev/scrub/releases/tag/v1.0.0
 [0.4.2]: https://github.com/scrub-dev/scrub/releases/tag/v0.4.2
 [0.4.1]: https://github.com/scrub-dev/scrub/releases/tag/v0.4.1
 [0.4.0]: https://github.com/scrub-dev/scrub/releases/tag/v0.4.0

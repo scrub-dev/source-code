@@ -281,6 +281,10 @@ Cross-cutting: config + hot reload · policy engine · observability/audit · se
 
 Status: ✅ done · 🚧 partial · ⬜ not started.
 
+**`1.0` shipped** — phases v0–v5 are GA (plus a Helm chart with HA, a multi-arch
+container image, and a docs website). The remaining items below are the post-`1.0`
+roadmap.
+
 | Phase | Status | Scope |
 |-------|--------|-------|
 | **v0** | ✅ | Explicit-endpoint proxy, provider-aware scan, glossary + regex + **entropy** from config, typed-sentinel masking, request + **session** in-mem map, **streaming rehydration**, **hot reload**, criterion benches. |
@@ -291,9 +295,9 @@ Status: ✅ done · 🚧 partial · ⬜ not started.
 | v5 | ✅ | TLS interception (MITM): per-host certs minted on the fly from a configured CA (`CertMinter` + rustls `ResolvesServerCert`), routed by `Host`. Both **SNI-transparent** and **CONNECT-proxy** modes (the latter blind-tunnels un-intercepted hosts). |
 | v6 | ⏸️ | Media scanning — OCR/vision over images, ASR over audio — **deferred until a stable release**; reuses the span → Vaultizer → rehydration path. |
 
-> **v2 and v6 are deferred** until SCRUB ships a stable, complete `1.0`. They remain
-> designed-for (the `SecretSource` and `Detector`/`Span` seams are in place) but are not
-> being built until the core is hardened and released.
+> **Post-`1.0`**: the AWS/GCP secret-manager connectors (v2) and media scanning (v6)
+> remain designed-for — the `SecretSource` and `Detector`/`Span` seams are in place —
+> and are scheduled now that the `1.0` core has shipped.
 
 ---
 
