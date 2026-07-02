@@ -3,8 +3,8 @@ name: scrub
 description: Reversible secret & PII masking proxy for LLM traffic (single binary, HA-capable)
 type: application
 # Chart version and the app/image version it deploys. Overridden at release time.
-version: 1.0.0
-appVersion: "1.0.0"
+version: 1.0.1
+appVersion: "1.0.1"
 home: https://github.com/scrub-dev/source-code
 sources:
   - https://github.com/scrub-dev/source-code

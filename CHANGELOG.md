@@ -4,9 +4,13 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.1] — 2026-06-29
 
-### Security
+Security-hardening release following a deep review of the data path. The only wire
+change is the sentinel format (`⟦S:TYPE·id·tag⟧`); multi-node clusters must set
+`sessions.encryption_key` (see below).
+
+### Security — sentinel authentication & masking coverage
 - **Authenticated sentinels** — every sentinel now carries a per-vault keyed MAC
   tag (`⟦S:TYPE·id·tag⟧`, HMAC-SHA256). Rehydration resolves an id only if its tag
   matches, so a hostile/compromised upstream can no longer forge or blindly
@@ -18,7 +22,7 @@ All notable changes to SCRUB are documented here. The format follows
   scans/rehydrates *every* string leaf, for deployments that want maximum coverage
   over provider-aware minimalism.
 
-### Security (earlier in this pre-release)
+### Security — SSRF, isolation, DoS, and fail-closed
 - **Upstream redirects are no longer followed** (proxy, interception, and Vault
   clients). Prevents SSRF to internal/metadata endpoints and stops a malicious
   upstream from getting a rehydrated (secret-bearing) response via a redirect; the
@@ -212,6 +216,7 @@ including across streamed responses.
 - Media (image/audio) scanning — the `Detector`/`Span` seam is in place.
 - CONNECT-proxy MITM mode (current interception is SNI-transparent).
 
+[1.0.1]: https://github.com/scrub-dev/scrub/releases/tag/v1.0.1
 [1.0.0]: https://github.com/scrub-dev/scrub/releases/tag/v1.0.0
 [0.4.2]: https://github.com/scrub-dev/scrub/releases/tag/v0.4.2
 [0.4.1]: https://github.com/scrub-dev/scrub/releases/tag/v0.4.1
