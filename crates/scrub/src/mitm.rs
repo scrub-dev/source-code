@@ -12,11 +12,22 @@ use rcgen::{Certificate, CertificateParams, DnType, KeyPair};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 
+/// Predicate deciding whether a given SNI host may be intercepted (minted for).
+pub type HostFilter = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// Safety cap on distinct cached hosts. With a host filter this is never reached
+/// (configured hosts are finite); without one it bounds memory under abuse.
+const MAX_CACHE: usize = 4096;
+
 /// Mints and caches per-SNI leaf certificates signed by the configured CA.
 pub struct CertMinter {
     ca_cert: Certificate,
     ca_key: KeyPair,
     cache: Mutex<HashMap<String, Arc<CertifiedKey>>>,
+    /// When set, only these hosts are minted for; all others are refused. This
+    /// stops an attacker from forcing unbounded key-generation + signing (a CPU
+    /// and memory DoS) by opening TLS handshakes with arbitrary SNI values.
+    allow_host: Option<HostFilter>,
 }
 
 impl CertMinter {
@@ -29,19 +40,35 @@ impl CertMinter {
             ca_cert,
             ca_key,
             cache: Mutex::new(HashMap::new()),
+            allow_host: None,
         })
+    }
+
+    /// Restrict minting to hosts accepted by `filter` (e.g. configured routes).
+    pub fn with_host_filter(mut self, filter: HostFilter) -> Self {
+        self.allow_host = Some(filter);
+        self
     }
 
     /// Get (or mint and cache) a leaf certificate for `host`.
     fn cert_for(&self, host: &str) -> anyhow::Result<Arc<CertifiedKey>> {
-        if let Some(ck) = self.cache.lock().unwrap().get(host) {
-            return Ok(ck.clone());
+        if let Some(allow) = &self.allow_host {
+            if !allow(host) {
+                anyhow::bail!("host {host} is not a configured interception target");
+            }
+        }
+        {
+            let cache = self.cache.lock().unwrap();
+            if let Some(ck) = cache.get(host) {
+                return Ok(ck.clone());
+            }
         }
         let ck = Arc::new(self.mint(host)?);
-        self.cache
-            .lock()
-            .unwrap()
-            .insert(host.to_string(), ck.clone());
+        let mut cache = self.cache.lock().unwrap();
+        if cache.len() >= MAX_CACHE {
+            cache.clear(); // bound memory; entries simply re-mint on demand
+        }
+        cache.insert(host.to_string(), ck.clone());
         Ok(ck)
     }
 
@@ -114,5 +141,23 @@ mod tests {
         // a different host mints a distinct cert
         let c = minter.cert_for("api.anthropic.com").unwrap();
         assert!(!Arc::ptr_eq(&a, &c));
+    }
+
+    #[test]
+    fn host_filter_refuses_unconfigured_hosts() {
+        let (ca_cert, ca_key) = test_ca();
+        let allow: HostFilter = Arc::new(|h: &str| h == "api.openai.com");
+        let minter = CertMinter::from_ca_pem(&ca_cert, &ca_key)
+            .unwrap()
+            .with_host_filter(allow);
+        assert!(minter.cert_for("api.openai.com").is_ok());
+        // An attacker-chosen SNI is refused — no key generation / caching.
+        assert!(minter.cert_for("evil.example.com").is_err());
+        assert!(minter
+            .cache
+            .lock()
+            .unwrap()
+            .get("evil.example.com")
+            .is_none());
     }
 }

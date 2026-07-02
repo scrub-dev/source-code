@@ -209,6 +209,10 @@ impl SecretSource for VaultSource {
         // (startup uses spawn_blocking; the reload watcher is its own thread).
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
+            // Never follow redirects: reqwest does not strip the custom
+            // `X-Vault-Token` header on a cross-host redirect, so a redirect could
+            // leak the token to another server.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(std::io::Error::other)?;
 

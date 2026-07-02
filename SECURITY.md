@@ -44,14 +44,31 @@ secret sources, or (for the Redis backend) the session store can see secrets.
   mint a trusted certificate for *any* host. Protect `intercept.ca_key_path` with
   the same rigor as a root signing key (restricted FS permissions, ideally an
   HSM/KMS in production), and scope the CA's distribution to managed clients only.
-- **Auth keys** are compared in constant time and never forwarded upstream.
+- **Auth keys** are compared as fixed-length SHA-256 digests in constant time
+  (revealing neither which key matched nor any key's length) and never forwarded
+  upstream.
 - **Audit log** is hash-chained and tamper-evident (`scrub audit-verify`), but it
   is a local file: protect it and consider shipping to append-only/WORM storage.
   It records detection **counts and types only — never values**.
 - **Transaction log** (optional) captures the **masked provider-facing** request and
   response — secret-free in enforce mode. In **dry-run** mode nothing is masked, so
   records contain original content; protect the file and avoid dry-run + transactions
-  outside a trusted boundary.
+  outside a trusted boundary. Audit and transaction logs are created `0600`
+  (owner-only) on Unix.
+
+### Network egress
+- **Upstream redirects are never followed.** A 3xx from the upstream is passed
+  through to the client, so a compromised/malicious upstream cannot redirect SCRUB
+  to an internal service or metadata endpoint (SSRF), nor cause SCRUB to rehydrate
+  an attacker-chosen target's response with the client's secrets. The Vault
+  connector likewise never follows redirects (its token can't leak to another host).
+- **The CONNECT proxy is not an open relay to internal hosts.** Blind tunnels
+  refuse loopback and link-local targets (blocking the cloud metadata endpoint at
+  `169.254.169.254` and localhost pivots), and connect to the exact vetted IP.
+  Still, bind the proxy to trusted networks — it will relay to arbitrary *public*
+  hosts by design.
+- **Certificate minting is bounded to configured interception hosts**, so an
+  attacker cannot force unbounded key-generation with arbitrary SNI values.
 
 ### Operational guidance
 - Terminate client TLS at SCRUB (`tls`) or run it behind a TLS terminator; the
@@ -62,11 +79,19 @@ secret sources, or (for the Redis backend) the session store can see secrets.
 - Rotate auth keys and the interception CA on a schedule.
 
 ### Known limitations (as of 1.0)
+- **Masking covers configured JSON content paths.** A request whose body is not
+  JSON (by content-type), does not parse as JSON, or carries secrets outside the
+  configured `scan_paths` is forwarded **unmasked**. SCRUB prevents leakage in
+  well-formed provider requests; it is not a DLP control against a client
+  *deliberately* exfiltrating over an unscanned channel.
+- The at-rest `encryption_key` is derived via SHA-256, not a password-stretching
+  KDF — use a **high-entropy** key (it is a shared cluster secret, not a password).
+- The audit hash-chain detects edits and mid-file deletions, but truncation of the
+  most recent records is not self-evident — ship to append-only/WORM storage if
+  that matters.
 - Auth keys are static (no built-in rotation/expiry).
 - The heuristic NER is **not** a trained model; it favors precision and will miss
   many names. Use it as defense-in-depth, not a sole PII control.
-- TLS interception is SNI-transparent (requires DNS/SNI redirection); a
-  CONNECT-proxy mode is not yet implemented.
 - Concurrent cross-node writes to the *same* session are last-write-wins per
   field; sticky sessions are recommended for strict ordering.
 - Audit writes are synchronous (durability over throughput, by design).

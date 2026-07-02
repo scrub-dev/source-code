@@ -6,6 +6,7 @@
 //! per-host cert minted from the CA), decrypts, masks/forwards/rehydrates, and
 //! re-encrypts. Hosts without a route are blind-tunnelled untouched.
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -116,8 +117,69 @@ async fn mitm_connection(
 }
 
 /// Blind byte tunnel for hosts SCRUB does not intercept.
+///
+/// The target `host` is client-controlled, so SCRUB would otherwise be an open
+/// proxy: we refuse to tunnel to loopback / link-local addresses (blocks the
+/// cloud metadata endpoint at 169.254.169.254 and localhost pivots) and connect
+/// to the exact vetted IP (no DNS-rebinding window between check and connect).
 async fn tunnel(mut client: TokioIo<Upgraded>, host: &str, port: u16) -> anyhow::Result<()> {
-    let mut upstream = TcpStream::connect((host, port)).await?;
+    let mut target = None;
+    for addr in tokio::net::lookup_host((host, port)).await? {
+        if is_blocked(&addr.ip()) {
+            tracing::warn!(%host, ip = %addr.ip(), "refusing to tunnel to blocked address");
+            continue;
+        }
+        target = Some(addr);
+        break;
+    }
+    let target =
+        target.ok_or_else(|| anyhow::anyhow!("no permitted address to tunnel for {host}"))?;
+    let mut upstream = TcpStream::connect(target).await?;
     tokio::io::copy_bidirectional(&mut client, &mut upstream).await?;
     Ok(())
+}
+
+/// Addresses SCRUB must never proxy to: loopback, link-local (incl. cloud
+/// metadata 169.254.169.254), and the unspecified address.
+fn is_blocked(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_link_local() || v4.is_unspecified(),
+        IpAddr::V6(v6) => {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return mapped.is_loopback() || mapped.is_link_local() || mapped.is_unspecified();
+            }
+            // fe80::/10 is IPv6 link-local.
+            v6.is_loopback() || v6.is_unspecified() || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_blocked;
+    use std::net::IpAddr;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn blocks_metadata_loopback_linklocal() {
+        // Cloud metadata + localhost + link-local + unspecified are refused.
+        assert!(is_blocked(&ip("169.254.169.254"))); // AWS/GCP/Azure metadata
+        assert!(is_blocked(&ip("127.0.0.1")));
+        assert!(is_blocked(&ip("0.0.0.0")));
+        assert!(is_blocked(&ip("::1")));
+        assert!(is_blocked(&ip("fe80::1")));
+        assert!(is_blocked(&ip("::ffff:127.0.0.1"))); // v4-mapped loopback
+    }
+
+    #[test]
+    fn allows_public_and_private_hosts() {
+        // Public internet and ordinary private ranges are tunnelable.
+        assert!(!is_blocked(&ip("1.1.1.1")));
+        assert!(!is_blocked(&ip("104.18.0.1")));
+        assert!(!is_blocked(&ip("10.0.0.5")));
+        assert!(!is_blocked(&ip("2606:4700::1")));
+    }
 }

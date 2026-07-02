@@ -4,6 +4,26 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+- **Upstream redirects are no longer followed** (proxy, interception, and Vault
+  clients). Prevents SSRF to internal/metadata endpoints and stops a malicious
+  upstream from getting a rehydrated (secret-bearing) response via a redirect; the
+  Vault connector can no longer leak `X-Vault-Token` to a redirect target.
+- **Session vaults are tenant-isolated by an unforgeable namespace scheme** — a
+  flat-auth (non-tenant) client can no longer craft a session key that collides
+  with a tenant's vault.
+- **CONNECT-proxy tunnels refuse loopback / link-local targets** (blocks the cloud
+  metadata endpoint `169.254.169.254` and localhost pivots) and connect to the
+  exact vetted IP (no DNS-rebind window).
+- **Certificate minting is restricted to configured interception hosts** (+ a cache
+  cap), preventing a DoS from unbounded key-generation on arbitrary SNI values.
+- **Audit and transaction logs are created `0600`** (owner-only) on Unix — the
+  transaction log can hold original content in dry-run mode.
+- **Proxy auth compares fixed-length SHA-256 digests** in constant time, removing a
+  key-length timing side channel.
+
 ## [1.0.0] — 2026-06-28
 
 First production release. SCRUB is a single-binary forward proxy that masks

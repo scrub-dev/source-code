@@ -122,6 +122,8 @@ async fn main() -> Result<()> {
         let cert = reqwest::Certificate::from_pem(&pem)?;
         let client = reqwest::Client::builder()
             .add_root_certificate(cert)
+            // Don't follow upstream redirects (SSRF / secret-exfiltration guard).
+            .redirect(reqwest::redirect::Policy::none())
             .build()?;
         state = state.with_upstream_client(client);
     }
@@ -188,7 +190,12 @@ async fn serve_tls(tls: &scrub_core::config::Tls, listen: &str, app: axum::Route
 }
 
 /// Load the interception CA and build a per-SNI cert-minting rustls server config.
-fn intercept_tls(cfg: &scrub_core::config::Intercept) -> Result<Arc<rustls::ServerConfig>> {
+/// Minting is restricted to hosts with a configured interception route, so an
+/// attacker can't force unbounded cert generation with arbitrary SNI values.
+fn intercept_tls(
+    cfg: &scrub_core::config::Intercept,
+    state: &Arc<proxy::AppState>,
+) -> Result<Arc<rustls::ServerConfig>> {
     let ca_cert_path = cfg
         .ca_cert_path
         .clone()
@@ -201,7 +208,11 @@ fn intercept_tls(cfg: &scrub_core::config::Intercept) -> Result<Arc<rustls::Serv
         .with_context(|| format!("reading {ca_cert_path}"))?;
     let ca_key =
         std::fs::read_to_string(&ca_key_path).with_context(|| format!("reading {ca_key_path}"))?;
-    let minter = Arc::new(scrub::mitm::CertMinter::from_ca_pem(&ca_cert, &ca_key)?);
+    let st = state.clone();
+    let filter: scrub::mitm::HostFilter =
+        Arc::new(move |host: &str| proxy::intercepts_host(&st, host));
+    let minter =
+        Arc::new(scrub::mitm::CertMinter::from_ca_pem(&ca_cert, &ca_key)?.with_host_filter(filter));
     scrub::mitm::server_config(minter)
 }
 
@@ -215,7 +226,7 @@ async fn serve_intercept(
     use axum_server::tls_rustls::RustlsConfig;
     use std::net::SocketAddr;
 
-    let tls = RustlsConfig::from_config(intercept_tls(cfg)?);
+    let tls = RustlsConfig::from_config(intercept_tls(cfg, &state)?);
 
     let listen = cfg
         .listen
@@ -248,7 +259,7 @@ async fn serve_connect_proxy(
     default_listen: &str,
     state: Arc<proxy::AppState>,
 ) -> Result<()> {
-    let tls = intercept_tls(cfg)?;
+    let tls = intercept_tls(cfg, &state)?;
     let listen = cfg
         .listen
         .clone()

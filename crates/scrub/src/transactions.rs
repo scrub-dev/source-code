@@ -24,7 +24,9 @@ pub struct TransactionLog {
 
 impl TransactionLog {
     pub fn open(path: impl AsRef<Path>) -> std::io::Result<Arc<Self>> {
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        // Owner-only (0600): in dry-run this file holds original request/response
+        // content, so it must never be world-readable.
+        let file = open_private_append(path.as_ref())?;
         Ok(Arc::new(Self {
             writer: Mutex::new(BufWriter::new(file)),
         }))
@@ -149,6 +151,26 @@ impl Recorder {
     }
 }
 
+/// Open a log file for append (creating it 0600), and tighten an existing file
+/// to owner-only too. On non-Unix the mode is a no-op.
+pub(crate) fn open_private_append(path: &Path) -> std::io::Result<File> {
+    let mut opts = OpenOptions::new();
+    opts.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let file = opts.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // Best-effort: tighten a pre-existing (possibly world-readable) file.
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(file)
+}
+
 /// A random hex request id.
 pub fn request_id() -> String {
     let mut b = [0u8; 8];
@@ -192,5 +214,21 @@ mod tests {
         assert_eq!(v["id"], "abc");
         assert_eq!(v["response"], "12345678");
         assert_eq!(v["response_truncated"], true);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn log_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut path = std::env::temp_dir();
+        path.push(format!("scrub-tx-perms-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let _log = TransactionLog::open(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "transaction log must not be group/world readable"
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }

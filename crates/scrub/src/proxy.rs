@@ -78,11 +78,20 @@ struct RouteRt {
     dry_run: bool,
 }
 
-/// Compiled proxy-auth settings. Keys are a `Vec` (not a set) so verification
-/// can compare against every key in constant time, without a hash-lookup oracle.
+/// Compiled proxy-auth settings. We store SHA-256 digests of the accepted keys
+/// (not the keys themselves), so verification compares fixed-length values in
+/// constant time — no hash-lookup oracle and no key-length timing leak.
 struct AuthCfg {
     header: String,
-    keys: Vec<String>,
+    key_hashes: Vec<[u8; 32]>,
+}
+
+/// SHA-256 of a string, used to compare auth keys at a fixed length.
+fn sha256(s: &str) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(s.as_bytes());
+    h.finalize().into()
 }
 
 impl Compiled {
@@ -159,7 +168,7 @@ impl Compiled {
             keys.extend(key_to_tenant.keys().cloned());
             AuthCfg {
                 header: cfg.auth.header.clone(),
-                keys,
+                key_hashes: keys.iter().map(|k| sha256(k)).collect(),
             }
         });
 
@@ -226,7 +235,13 @@ impl AppState {
         compiled: Arc<ArcSwap<Compiled>>,
         sessions: Arc<dyn SessionBackend>,
     ) -> anyhow::Result<Self> {
-        let client = reqwest::Client::builder().build()?;
+        // Never follow upstream redirects: a compromised/malicious upstream could
+        // 3xx us to an internal service or metadata endpoint (SSRF), and — worse —
+        // we would rehydrate that target's response, splicing the client's secrets
+        // into attacker-controlled content. Pass 3xx through to the client instead.
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
         Ok(Self {
             compiled,
             sessions,
@@ -833,17 +848,31 @@ async fn select_vault(
     match scope {
         Scope::Request => (Arc::new(Vault::new()), None),
         Scope::Session => match session_key(headers, session_header) {
-            // Namespace by tenant so two tenants' session keys never collide.
+            // Namespace by tenant so sessions never collide across the tenant
+            // boundary. The scheme discriminator (`t`/`g`) is prepended by us, not
+            // derived from the client-controlled key, so a global (flat-auth)
+            // client cannot forge a tenant's key: its namespace always starts
+            // `g\u{1f}…`, never `t\u{1f}…`.
             Some(key) => {
-                let namespaced = match tenant_id {
-                    Some(t) => format!("{t}\u{1f}{key}"),
-                    None => key,
-                };
+                let namespaced = session_namespace(tenant_id, &key);
                 let vault = state.sessions.acquire(&namespaced).await;
                 (vault, Some(namespaced))
             }
             None => (Arc::new(Vault::new()), None),
         },
+    }
+}
+
+/// Build the tenant-isolated session namespace for a client session key.
+///
+/// The scheme discriminator (`t`/`g`) and separators are prepended by us, not
+/// derived from the client-controlled `key`, so a global (flat-auth) client can
+/// never forge a tenant's namespace: a global key is `g\u{1f}…`, a tenant key is
+/// `t\u{1f}<id>\u{1f}…`, and the two prefixes are disjoint.
+fn session_namespace(tenant_id: Option<&str>, key: &str) -> String {
+    match tenant_id {
+        Some(t) => format!("t\u{1f}{t}\u{1f}{key}"),
+        None => format!("g\u{1f}{key}"),
     }
 }
 
@@ -855,9 +884,12 @@ fn authorized(headers: &HeaderMap, auth: &AuthCfg) -> bool {
     let Some(presented) = headers.get(&auth.header).and_then(|v| v.to_str().ok()) else {
         return false;
     };
+    // Compare fixed-length digests so timing reveals neither which key matched
+    // nor the length of any configured key.
+    let presented = sha256(presented);
     let mut matched = 0u8;
-    for key in &auth.keys {
-        matched |= key.as_bytes().ct_eq(presented.as_bytes()).unwrap_u8();
+    for key in &auth.key_hashes {
+        matched |= key.ct_eq(&presented).unwrap_u8();
     }
     matched == 1
 }
@@ -919,4 +951,42 @@ fn text_response(status: StatusCode, body: String) -> Response {
         .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
         .body(Body::from(body))
         .expect("static response builds")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_session_key_cannot_forge_a_tenant_namespace() {
+        // A tenant "acme" with session key "s".
+        let tenant = session_namespace(Some("acme"), "s");
+        // A flat-auth (global) client tries to reach it by crafting a key that
+        // embeds the old separator scheme.
+        let forged = session_namespace(None, "acme\u{1f}s");
+        assert_ne!(tenant, forged, "global client must not forge a tenant key");
+        // And two different tenants never collide.
+        assert_ne!(
+            session_namespace(Some("a"), "k"),
+            session_namespace(Some("b"), "k")
+        );
+        // Prefixes are disjoint by construction.
+        assert!(tenant.starts_with("t\u{1f}"));
+        assert!(forged.starts_with("g\u{1f}"));
+    }
+
+    #[test]
+    fn auth_is_constant_time_and_correct() {
+        let auth = AuthCfg {
+            header: "x-scrub-key".into(),
+            key_hashes: vec![sha256("alpha-secret"), sha256("beta-secret")],
+        };
+        let mut ok = HeaderMap::new();
+        ok.insert("x-scrub-key", HeaderValue::from_static("beta-secret"));
+        assert!(authorized(&ok, &auth));
+        let mut bad = HeaderMap::new();
+        bad.insert("x-scrub-key", HeaderValue::from_static("beta-secre"));
+        assert!(!authorized(&bad, &auth));
+        assert!(!authorized(&HeaderMap::new(), &auth));
+    }
 }

@@ -8,7 +8,7 @@
 //! Verify with `scrub audit-verify <path>` or [`verify`].
 
 use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::Mutex;
@@ -70,7 +70,8 @@ impl AuditLog {
             // Missing file -> fresh chain; other read issues -> also start fresh.
             Err(_) => (0, String::new()),
         };
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        // Owner-only (0600), like the transaction log.
+        let file = crate::transactions::open_private_append(path)?;
         Ok(std::sync::Arc::new(Self {
             inner: Mutex::new(Inner {
                 writer: BufWriter::new(file),
