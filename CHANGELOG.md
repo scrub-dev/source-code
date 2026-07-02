@@ -4,6 +4,14 @@ All notable changes to SCRUB are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] — 2026-06-29
+
+### Added
+- **AI-agent onboarding**: a root `SKILL.md` (agent skill) describing how to
+  self-install and operate SCRUB, plus generated `/llms.txt` and `/llms-full.txt`
+  on the docs site (the [llmstxt.org](https://llmstxt.org) convention) so AI agents
+  can discover, install, and use SCRUB.
+
 ## [1.0.1] — 2026-06-29
 
 Security-hardening release following a deep review of the data path. The only wire
@@ -216,6 +224,7 @@ including across streamed responses.
 - Media (image/audio) scanning — the `Detector`/`Span` seam is in place.
 - CONNECT-proxy MITM mode (current interception is SNI-transparent).
 
+[1.0.2]: https://github.com/scrub-dev/scrub/releases/tag/v1.0.2
 [1.0.1]: https://github.com/scrub-dev/scrub/releases/tag/v1.0.1
 [1.0.0]: https://github.com/scrub-dev/scrub/releases/tag/v1.0.0
 [0.4.2]: https://github.com/scrub-dev/scrub/releases/tag/v0.4.2

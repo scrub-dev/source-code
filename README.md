@@ -19,6 +19,9 @@ client ─┤  app   ├──────────────►│ SCRUB  
 
 - **Website:** a generated docs/guides site lives in [`website/`](website/) (shadcn-styled,
   static, deployed to GitHub Pages).
+- **For AI agents:** an [agent skill](SKILL.md) describes how to self-install and operate
+  SCRUB; the site also serves [`/llms.txt`](https://scrub-dev.github.io/source-code/llms.txt)
+  and [`/llms-full.txt`](https://scrub-dev.github.io/source-code/llms-full.txt).
 - **Docs:** [Configuration](docs/CONFIGURATION.md) · [Deployment & Ops](docs/DEPLOYMENT.md) ·
   [Use as an HTTP proxy](docs/HTTP-PROXY.md) · [Kubernetes (Helm)](docs/DEPLOYMENT.md#kubernetes-helm) ·
   [Security & Threat Model](SECURITY.md) · [Design](DESIGN.md) · [Changelog](CHANGELOG.md)
