@@ -53,6 +53,11 @@ pub struct IdSpace {
     pub end: u32,
 }
 
+/// Reserved id meaning "id space exhausted": the original is masked (hidden from
+/// the upstream) but not stored, so it never collides with another node's range;
+/// [`MappingStore::resolve`] returns `None` for it.
+const OVERFLOW_ID: u32 = u32::MAX;
+
 impl IdSpace {
     /// The whole `u32` range (single-node / request scope).
     pub const FULL: IdSpace = IdSpace {
@@ -163,6 +168,14 @@ impl MappingStore for Vault {
         if let Some(&id) = inner.forward.get(original) {
             return id;
         }
+        // Never allocate at/after this vault's space end — that range belongs to
+        // another node, and minting there would let a sentinel rehydrate to the
+        // wrong secret across nodes. On exhaustion, mask with the reserved
+        // OVERFLOW_ID: the value is still hidden from the upstream, it just won't
+        // rehydrate (fail-safe — no cross-node confusion, no leak).
+        if inner.next >= self.space.end || inner.next == OVERFLOW_ID {
+            return OVERFLOW_ID;
+        }
         let id = inner.next;
         inner.next += 1;
         inner.forward.insert(original.to_vec(), id);
@@ -171,6 +184,9 @@ impl MappingStore for Vault {
     }
 
     fn resolve(&self, id: u32) -> Option<Vec<u8>> {
+        if id == OVERFLOW_ID {
+            return None;
+        }
         self.inner.lock().unwrap().reverse.get(&id).cloned()
     }
 
@@ -224,6 +240,25 @@ mod tests {
         // Each id resolves back to its own original.
         let id7 = v.intern(b"secret-7", None);
         assert_eq!(v.resolve(id7).as_deref(), Some(&b"secret-7"[..]));
+    }
+
+    #[test]
+    fn exhausted_space_never_crosses_into_the_next_node() {
+        // Node A owns [10, 13); after 3 originals it must not mint id 13+ (node B's
+        // range) — it returns the reserved overflow id instead.
+        let a = Vault::with_id_space(IdSpace { base: 10, end: 13 });
+        assert_eq!(a.intern(b"x", None), 10);
+        assert_eq!(a.intern(b"y", None), 11);
+        assert_eq!(a.intern(b"z", None), 12);
+        // Exhausted: further distinct originals get the non-reversible overflow id.
+        let of = a.intern(b"w", None);
+        assert_eq!(of, u32::MAX);
+        assert!(of < 13 || of == u32::MAX); // never in [13, ..) node B's space
+        assert_eq!(a.intern(b"another", None), u32::MAX);
+        // Overflow ids are masked but never rehydrate (fail-safe).
+        assert_eq!(a.resolve(u32::MAX), None);
+        // Already-mapped originals still resolve correctly.
+        assert_eq!(a.resolve(11).as_deref(), Some(&b"y"[..]));
     }
 
     #[test]

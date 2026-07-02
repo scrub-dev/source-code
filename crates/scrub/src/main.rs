@@ -79,7 +79,20 @@ async fn main() -> Result<()> {
             let kv = redis_backend::RedisKv::connect(&url)
                 .await
                 .with_context(|| format!("connecting to redis at {url}"))?;
-            let node_id = cfg.sessions.node_id.unwrap_or_else(random_node_id);
+            let node_id = match cfg.sessions.node_id {
+                Some(id) => id,
+                None => {
+                    let id = random_node_id();
+                    tracing::warn!(
+                        node_id = id,
+                        "sessions.node_id is unset — using a RANDOM id. Every node in a \
+                         multi-node cluster MUST set a distinct sessions.node_id (or \
+                         SCRUB_NODE_ID); otherwise two nodes can collide on one id space and \
+                         corrupt shared sessions."
+                    );
+                    id
+                }
+            };
             tracing::info!(node_id, "cluster node id");
             match &cfg.sessions.encryption_key {
                 Some(pass) => {

@@ -8,7 +8,7 @@
 
 use serde_json::Value;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::detect::Detector;
 use crate::mask::{apply_spans, MaskStyle};
@@ -86,22 +86,31 @@ pub fn mask_json_paths(
     process_json_paths(value, paths, detector, Some(store), style).total
 }
 
-/// Rehydrate every string reachable by `paths` through a *persistent*
-/// `rehydrator`, in document order. Used per SSE event so a sentinel fragmented
-/// across delta events reassembles in the rehydrator's carry buffer; the JSON is
-/// re-serialized afterwards, which re-escapes the spliced originals.
+/// Rehydrate every string reachable by `paths`, giving each **distinct leaf** its
+/// own persistent [`Rehydrator`] (keyed by the concrete path incl. array indices)
+/// in `rehydrators`. Persistence is *per leaf* so a sentinel fragmented across SSE
+/// delta events reassembles for that leaf — while a partial sentinel's carry can
+/// never bleed from one leaf (e.g. `choices[0]`) into another (`choices[1]`),
+/// which would leak an un-rehydrated sentinel. The JSON is re-serialized
+/// afterwards, which re-escapes the spliced originals.
 pub fn rehydrate_json_paths(
     value: &mut Value,
     paths: &[String],
-    rehydrator: &mut Rehydrator,
+    rehydrators: &mut HashMap<String, Rehydrator>,
     store: &dyn MappingStore,
 ) {
     for path in paths {
         let segments: Vec<&str> = path.split('.').collect();
-        walk(value, &segments, &mut |s: &mut String| {
-            let out = rehydrator.push(s.as_bytes(), store);
-            *s = String::from_utf8_lossy(&out).into_owned();
-        });
+        walk_keyed(
+            value,
+            &segments,
+            String::new(),
+            &mut |key: &str, s: &mut String| {
+                let re = rehydrators.entry(key.to_string()).or_default();
+                let out = re.push(s.as_bytes(), store);
+                *s = String::from_utf8_lossy(&out).into_owned();
+            },
+        );
     }
 }
 
@@ -110,6 +119,31 @@ fn parse_segment(seg: &str) -> (&str, bool) {
     match seg.strip_suffix("[]") {
         Some(key) => (key, true),
         None => (seg, false),
+    }
+}
+
+/// Like [`walk`], but threads a `key` identifying the concrete leaf (with array
+/// indices, e.g. `choices[0].delta.content`) so callers can keep independent
+/// per-leaf state. Invokes `f(key, leaf)` on each string leaf reached.
+fn walk_keyed(v: &mut Value, segments: &[&str], key: String, f: &mut dyn FnMut(&str, &mut String)) {
+    let Some((seg, rest)) = segments.split_first() else {
+        if let Value::String(s) = v {
+            f(&key, s);
+        }
+        return;
+    };
+    let (name, is_array) = parse_segment(seg);
+    let Some(child) = v.get_mut(name) else {
+        return;
+    };
+    if is_array {
+        if let Value::Array(items) = child {
+            for (i, item) in items.iter_mut().enumerate() {
+                walk_keyed(item, rest, format!("{key}{name}[{i}]."), f);
+            }
+        }
+    } else {
+        walk_keyed(child, rest, format!("{key}{name}."), f);
     }
 }
 
@@ -153,6 +187,48 @@ rules:
         )
         .unwrap();
         Detector::from_config(&cfg).unwrap()
+    }
+
+    #[test]
+    fn per_leaf_rehydrators_do_not_cross_contaminate() {
+        // Regression: with n>1 choices and a sentinel fragmented across SSE events,
+        // one leaf's partial-sentinel carry must not bleed into another leaf.
+        let v = Vault::new();
+        let id = v.intern(b"john@acme.com", Some("EMAIL"));
+        let mut s = Vec::new();
+        crate::sentinel::encode(&mut s, Some("EMAIL"), id);
+        let sent = String::from_utf8(s).unwrap();
+        // Split inside the (ASCII) type name — a char boundary, mid-sentinel.
+        let at = sent.find("EMAIL").unwrap() + 2;
+        let (head, tail) = sent.split_at(at);
+
+        let paths = vec!["choices[].delta.content".to_string()];
+        let mut res: HashMap<String, Rehydrator> = HashMap::new();
+
+        // Event 1: choice0 = start of the sentinel, choice1 = unrelated "X".
+        let mut e1: Value =
+            serde_json::json!({"choices":[{"delta":{"content":head}},{"delta":{"content":"X"}}]});
+        rehydrate_json_paths(&mut e1, &paths, &mut res, &v);
+        // Event 2: choice0 = rest of the sentinel, choice1 = "Y".
+        let mut e2: Value =
+            serde_json::json!({"choices":[{"delta":{"content":tail}},{"delta":{"content":"Y"}}]});
+        rehydrate_json_paths(&mut e2, &paths, &mut res, &v);
+
+        let c0 = format!(
+            "{}{}",
+            e1["choices"][0]["delta"]["content"].as_str().unwrap(),
+            e2["choices"][0]["delta"]["content"].as_str().unwrap()
+        );
+        let c1 = format!(
+            "{}{}",
+            e1["choices"][1]["delta"]["content"].as_str().unwrap(),
+            e2["choices"][1]["delta"]["content"].as_str().unwrap()
+        );
+        assert_eq!(
+            c0, "john@acme.com",
+            "choice 0 sentinel must rehydrate cleanly"
+        );
+        assert_eq!(c1, "XY", "choice 1 must be free of choice 0's carry");
     }
 
     #[test]

@@ -663,7 +663,10 @@ fn sse_rehydrating_stream(
     struct St {
         up: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
         buf: Vec<u8>,
-        re: Rehydrator,
+        // One rehydrator per concrete leaf (e.g. `choices[0].delta.content`) so a
+        // partial sentinel's carry never bleeds between leaves. Raw encoding: serde
+        // re-escapes on re-serialization.
+        res: std::collections::HashMap<String, Rehydrator>,
         vault: Arc<dyn MappingStore>,
         paths: Vec<String>,
         rec: Option<Recorder>,
@@ -673,7 +676,7 @@ fn sse_rehydrating_stream(
     let st = St {
         up: Box::pin(upstream.bytes_stream()),
         buf: Vec::new(),
-        re: Rehydrator::new(), // Raw: serde re-escapes on re-serialization
+        res: std::collections::HashMap::new(),
         vault,
         paths: stream_paths,
         rec: recorder,
@@ -689,7 +692,7 @@ fn sse_rehydrating_stream(
             let mut out = Vec::new();
             while let Some(pos) = find_event_end(&st.buf) {
                 let event: Vec<u8> = st.buf.drain(..pos).collect();
-                process_sse_event(&event, &mut st.re, st.vault.as_ref(), &st.paths, &mut out);
+                process_sse_event(&event, &mut st.res, st.vault.as_ref(), &st.paths, &mut out);
             }
             if !out.is_empty() {
                 return Some((Ok(Bytes::from(out)), st));
@@ -712,13 +715,16 @@ fn sse_rehydrating_stream(
                         let event = std::mem::take(&mut st.buf);
                         process_sse_event(
                             &event,
-                            &mut st.re,
+                            &mut st.res,
                             st.vault.as_ref(),
                             &st.paths,
                             &mut out,
                         );
                     }
-                    out.extend_from_slice(&st.re.finish()); // any held-back bytes, verbatim
+                    // Flush any held-back tail from every leaf's rehydrator, verbatim.
+                    for re in st.res.values_mut() {
+                        out.extend_from_slice(&re.finish());
+                    }
                     if let Some(r) = st.rec.take() {
                         r.finish(); // upstream done — write the transaction record
                     }
@@ -738,9 +744,10 @@ fn find_event_end(buf: &[u8]) -> Option<usize> {
 }
 
 /// Rehydrate one SSE event's `data:` JSON content paths, appending to `out`.
+/// `res` holds the persistent per-leaf rehydrators (shared across events).
 fn process_sse_event(
     event: &[u8],
-    re: &mut Rehydrator,
+    res: &mut std::collections::HashMap<String, Rehydrator>,
     store: &dyn MappingStore,
     paths: &[String],
     out: &mut Vec<u8>,
@@ -758,7 +765,7 @@ fn process_sse_event(
         let payload = payload.trim();
         match serde_json::from_str::<serde_json::Value>(payload) {
             Ok(mut value) if payload != "[DONE]" => {
-                scrub_core::scan::rehydrate_json_paths(&mut value, paths, re, store);
+                scrub_core::scan::rehydrate_json_paths(&mut value, paths, res, store);
                 out.extend_from_slice(b"data: ");
                 match serde_json::to_string(&value) {
                     Ok(s) => out.extend_from_slice(s.as_bytes()),

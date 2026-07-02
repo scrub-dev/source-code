@@ -31,11 +31,20 @@ impl RedisKv {
 impl KvStore for RedisKv {
     async fn hgetall(&self, key: &str) -> Vec<(String, Vec<u8>)> {
         let mut conn = self.conn.clone();
-        redis::cmd("HGETALL")
+        match redis::cmd("HGETALL")
             .arg(key)
             .query_async::<Vec<(String, Vec<u8>)>>(&mut conn)
             .await
-            .unwrap_or_default()
+        {
+            Ok(entries) => entries,
+            Err(e) => {
+                // A read error is NOT an empty session: proceeding with an empty
+                // vault would re-mint ids and could clobber existing mappings on
+                // commit. Surface it loudly (run Redis HA); see SECURITY.md.
+                tracing::error!(error = %e, "redis HGETALL failed; treating session as empty may corrupt its mappings");
+                Vec::new()
+            }
+        }
     }
 
     async fn hset_with_ttl(&self, key: &str, fields: &[(String, Vec<u8>)], ttl: Duration) {

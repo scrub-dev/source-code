@@ -38,16 +38,24 @@ secret sources, or (for the Redis backend) the session store can see secrets.
 the same session-header value shares one reverse-mapping vault, and — by the
 reversibility contract — anyone who can get the upstream to emit a sentinel (e.g.
 by asking the model to echo `⟦S:TYPE·id⟧`) has that id rehydrated back to its
-original. So a shared session vault is fully readable by anyone holding the
-session key. Use **one session per user/trust-unit**, make session keys
-**unguessable**, and don't mix different users' secrets under one session key.
+original. Rehydration resolves on the id alone (ids are small integers; the type
+label is not authenticated), so a compromised/hostile upstream can enumerate a
+session vault by echoing `⟦S·0⟧`, `⟦S·1⟧`, … A shared session vault is therefore
+fully readable by anyone holding the session key **and** by a hostile upstream.
+Use **one session per user/trust-unit**, make session keys **unguessable**, keep
+the upstream trusted, and don't mix different users' secrets under one session
+key. (Request scope confines this to the caller's own current request.)
 
 ### Sensitive material and how it is handled
 - **In-memory vaults** (request/session mappings) are zeroized on drop; session
   scope is bounded by TTL.
 - **Redis-backed sessions** persist mappings off-process. Enable
   `sessions.encryption_key` (AES-256-GCM) so the store holds only ciphertext, and
-  run Redis with AUTH + TLS on a private network.
+  run Redis with AUTH + TLS on a private network. Give **every node a distinct
+  `sessions.node_id`** (the Helm chart derives it from the pod ordinal) — colliding
+  ids share an id space and corrupt sessions. Run Redis **HA**: a transient read
+  failure is surfaced loudly but can still corrupt a session's mappings for that
+  request.
 - **The interception CA key is the most dangerous secret in the system** — it can
   mint a trusted certificate for *any* host. Protect `intercept.ca_key_path` with
   the same rigor as a root signing key (restricted FS permissions, ideally an

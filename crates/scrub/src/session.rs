@@ -223,7 +223,7 @@ pub fn parse_duration(s: Option<&str>, default: Duration) -> Duration {
         _ => return default,
     };
     match num.trim().parse::<u64>() {
-        Ok(n) => Duration::from_secs(n * unit),
+        Ok(n) => Duration::from_secs(n.saturating_mul(unit)),
         Err(_) => default,
     }
 }

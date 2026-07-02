@@ -28,7 +28,16 @@ pub fn load(config_path: &Path) -> anyhow::Result<(Config, Compiled)> {
     let cfg = Config::from_yaml(&yaml)
         .with_context(|| format!("parsing config {}", config_path.display()))?;
     let base = base_dir(config_path);
-    let terms = secrets::load_sources(&cfg.sources, &base);
+    let (terms, errored) = secrets::load_sources(&cfg.sources, &base);
+    // Fail closed: never build a config with silently-dropped secret terms (that
+    // would forward those secrets unmasked). On reload the caller keeps the
+    // previous good config; at startup we refuse to run with reduced coverage.
+    if errored {
+        anyhow::bail!(
+            "one or more secret sources failed to load; refusing to build a config \
+             with reduced masking coverage (fix the source or remove it from config)"
+        );
+    }
     let compiled = Compiled::build(&cfg, terms)?;
     Ok((cfg, compiled))
 }

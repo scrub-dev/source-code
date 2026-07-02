@@ -27,6 +27,19 @@ All notable changes to SCRUB are documented here. The format follows
   hash — two distinct secrets can no longer be conflated into one sentinel (which
   would mis-rehydrate one secret as another in a shared session vault). All
   plaintext copies (forward keys + reverse values) are zeroized on drop.
+- **Per-leaf streaming rehydration**: each response content leaf (e.g. each
+  `choices[i].delta.content`) gets its own rehydrator, so a partial sentinel's
+  carry can no longer bleed between leaves and leak an un-rehydrated sentinel when
+  `n > 1` (multiple choices / content items) with a sentinel split across events.
+- **Id-space exhaustion is fail-safe**: a session vault never mints an id past its
+  node's range (which would rehydrate to the wrong secret across nodes) — on
+  exhaustion the value is masked with a reserved non-reversible id.
+- **Secret-source loading fails closed**: if a configured source (file/Vault)
+  errors, reload keeps the previous good config and startup refuses, rather than
+  silently running with reduced masking coverage.
+- **Loud warning when `sessions.node_id` is unset** with the Redis backend (random
+  fallback can collide across nodes); Redis read failures are logged (not silently
+  treated as an empty session); `masking.ttl` parsing no longer overflows.
 
 ## [1.0.0] — 2026-06-28
 

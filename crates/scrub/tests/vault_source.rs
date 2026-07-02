@@ -48,7 +48,8 @@ fn vault_source_pulls_values() {
         min_len: 5,
     }];
 
-    let terms = scrub::secrets::load_sources(&specs, Path::new("."));
+    let (terms, errored) = scrub::secrets::load_sources(&specs, Path::new("."));
+    assert!(!errored, "vault source should load without error");
     let values: Vec<&str> = terms.iter().map(|t| t.term.as_str()).collect();
 
     assert!(values.contains(&"sk-supersecret-vault-value"), "{values:?}");

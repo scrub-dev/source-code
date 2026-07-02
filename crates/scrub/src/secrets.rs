@@ -19,10 +19,14 @@ pub trait SecretSource {
     fn load(&self) -> std::io::Result<Vec<LiteralTerm>>;
 }
 
-/// Resolve every configured source against `base_dir`, returning all terms.
-/// A failing source is logged and skipped so one bad path can't break reload.
-pub fn load_sources(specs: &[SourceSpec], base_dir: &Path) -> Vec<LiteralTerm> {
+/// Resolve every configured source against `base_dir`. Returns all terms plus a
+/// flag that is `true` if **any** source failed to load. Callers must treat an
+/// error as fail-closed (a source that previously masked secrets silently
+/// dropping out would forward those secrets unmasked): reload keeps the previous
+/// config, and startup refuses rather than run with reduced masking coverage.
+pub fn load_sources(specs: &[SourceSpec], base_dir: &Path) -> (Vec<LiteralTerm>, bool) {
     let mut terms = Vec::new();
+    let mut errored = false;
     for spec in specs {
         let source = from_spec(spec, base_dir);
         match source.load() {
@@ -31,11 +35,12 @@ pub fn load_sources(specs: &[SourceSpec], base_dir: &Path) -> Vec<LiteralTerm> {
                 terms.extend(t);
             }
             Err(e) => {
-                tracing::warn!(source = %source.name(), error = %e, "skipping secret source");
+                errored = true;
+                tracing::error!(source = %source.name(), error = %e, "secret source failed to load");
             }
         }
     }
-    terms
+    (terms, errored)
 }
 
 /// Paths that should be watched for reload, resolved against `base_dir`.
