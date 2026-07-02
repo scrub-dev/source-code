@@ -13,6 +13,10 @@ regex-automata = { workspace = true }
 memchr = { workspace = true }
 bytes = { workspace = true }
 zeroize = { workspace = true }
+sha2 = "0.10"
+hmac = "0.12"
+subtle = "2.6"
+getrandom = "0.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

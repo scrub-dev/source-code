@@ -27,7 +27,7 @@ flowchart LR
     RX --> OV
     EN --> OV
     NER --> OV
-    OV --> SP["Spans → mask ⟦S:TYPE·id⟧"]
+    OV --> SP["Spans → mask ⟦S:TYPE·id·tag⟧"]
 ```
 
 ## Writing a rule

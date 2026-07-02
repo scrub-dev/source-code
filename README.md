@@ -34,9 +34,11 @@ client ─┤  app   ├──────────────►│ SCRUB  
    (`messages[].content`, …) using a glossary (Aho-Corasick), a single-pass regex
    meta-engine, an optional entropy catcher, secret-store values, and an optional
    heuristic NER.
-2. **Mask** — each detected span is replaced by a reversible **sentinel** `⟦S:TYPE·id⟧`.
+2. **Mask** — each detected span is replaced by a reversible **sentinel** `⟦S:TYPE·id·tag⟧`.
    The `id` indexes a reverse table held only in SCRUB; the secret never leaves. Equal
-   originals dedupe to the same id (stable pseudonyms).
+   originals dedupe to the same id (stable pseudonyms). The `tag` is a per-vault keyed
+   MAC, so only sentinels SCRUB actually issued rehydrate — a hostile upstream can't
+   forge `⟦S·0⟧`, `⟦S·1⟧`, … to read the vault.
 3. **Forward** — the masked request goes to the configured upstream.
 4. **Rehydrate** — as the response streams back, SCRUB splices the originals back in. It is
    correct at every byte boundary and **reassembles a sentinel fragmented across SSE

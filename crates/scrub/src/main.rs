@@ -94,15 +94,18 @@ async fn main() -> Result<()> {
                 }
             };
             tracing::info!(node_id, "cluster node id");
+            // Secret from which each session's sentinel tag key is derived. From
+            // the encryption key (so all nodes agree) or random per-process.
+            let tag_secret = session_tag_secret(cfg.sessions.encryption_key.as_deref());
             match &cfg.sessions.encryption_key {
                 Some(pass) => {
                     let cipher = scrub::crypto::Cipher::from_passphrase(pass);
                     tracing::info!(%url, "using redis session backend (encrypted at rest)");
-                    session::KvSessionBackend::encrypted(kv, ttl, cipher, node_id)
+                    session::KvSessionBackend::encrypted(kv, ttl, cipher, node_id, tag_secret)
                 }
                 None => {
                     tracing::warn!(%url, "using redis session backend (UNENCRYPTED at rest; set sessions.encryption_key)");
-                    session::KvSessionBackend::new(kv, ttl, node_id)
+                    session::KvSessionBackend::new(kv, ttl, node_id, tag_secret)
                 }
             }
         }
@@ -301,6 +304,27 @@ fn audit_verify(path: Option<&str>) -> Result<()> {
             report.broken_at.unwrap(),
             report.count
         );
+    }
+}
+
+/// Derive the cluster-wide secret used to key session sentinel tags. From the
+/// at-rest `encryption_key` when set (so every node derives the same per-session
+/// tag key), else random per process (fine single-node; multi-node without an
+/// encryption key can't share tagged sentinels — set one).
+fn session_tag_secret(encryption_key: Option<&str>) -> [u8; 32] {
+    match encryption_key {
+        Some(k) => {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(b"scrub-session-tag-v1"); // domain-separate from the AES key
+            h.update(k.as_bytes());
+            h.finalize().into()
+        }
+        None => {
+            let mut b = [0u8; 32];
+            let _ = getrandom::getrandom(&mut b);
+            b
+        }
     }
 }
 

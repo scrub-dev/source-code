@@ -46,12 +46,14 @@ routes:
 ## `profiles`
 
 Provider-aware content paths. A path is dot-separated; a `[]` suffix descends into every
-array element. Only string leaves are masked/rehydrated.
+array element. Only string leaves are masked/rehydrated. The special path `"**"` scans
+**every** string leaf in the body (comprehensive, opt-in — favors recall over the
+provider-aware minimalism, so validate for false positives).
 
 | Key | Type | Notes |
 |-----|------|-------|
-| `scan_paths` | string[] | Request JSON paths to mask, e.g. `messages[].content`. |
-| `stream_paths` | string[] | **SSE response** content paths to rehydrate per event, e.g. `choices[].delta.content` (OpenAI), `delta.text` (Anthropic). Required for streaming. |
+| `scan_paths` | string[] | Request JSON paths to mask, e.g. `messages[].content`; or `["**"]` for all string leaves. |
+| `stream_paths` | string[] | **SSE response** content paths to rehydrate per event, e.g. `choices[].delta.content` (OpenAI), `delta.text` (Anthropic). Required for streaming; `["**"]` rehydrates all leaves. |
 
 ```yaml
 profiles:
@@ -66,8 +68,8 @@ Global masking policy (each field overridable per route/tenant).
 
 | Key | Type | Default | Notes |
 |-----|------|---------|-------|
-| `mode` | `enforce` \| `dry-run` | `enforce` | Dry-run forwards the original and only reports. |
-| `style` | `typed-sentinel` \| `bare-sentinel` | `typed-sentinel` | `⟦S:EMAIL·id⟧` vs `⟦S·id⟧`. |
+| `mode` | `enforce` \| `dry-run` | `enforce` | Dry-run forwards the original and only reports. In enforce mode a JSON-typed body that fails to parse is **rejected (422)**, not forwarded unmasked. |
+| `style` | `typed-sentinel` \| `bare-sentinel` | `typed-sentinel` | `⟦S:EMAIL·id·tag⟧` vs `⟦S·id·tag⟧` (the `tag` is a keyed MAC that authenticates the sentinel). |
 | `scope` | `request` \| `session` | `request` | Session scope gives stable pseudonyms across a conversation. |
 | `ttl` | duration | `30m` | Session idle timeout (`45s`, `30m`, `1h`, `90`). |
 | `session_header` | string | `x-scrub-session` | Request header identifying a session. |
@@ -198,7 +200,7 @@ Where session reverse-maps live.
 |-----|---------|-------|
 | `backend` | `memory` | `memory` (single node) or `redis` (cross-node). |
 | `redis_url` | — | e.g. `rediss://redis.internal:6379/`. |
-| `encryption_key` | — | Passphrase → AES-256-GCM at rest; required for secret-free Redis. |
+| `encryption_key` | — | Passphrase → AES-256-GCM at rest; required for secret-free Redis. Also derives the per-session sentinel MAC key, so **set it on multi-node clusters** or a session's sentinels won't rehydrate across nodes. |
 | `node_id` | random | `0..4095`, **distinct per node**; partitions the id space. |
 
 ## `tls`

@@ -493,8 +493,20 @@ async fn forward(
                 }
             }
             Err(e) => {
-                tracing::warn!(error = %e, "body not valid JSON; forwarding unmasked");
-                body_bytes.to_vec()
+                if dry_run {
+                    tracing::warn!(error = %e, "body not valid JSON; forwarding original (dry-run)");
+                    body_bytes.to_vec()
+                } else {
+                    // Fail closed: a JSON-typed body we can't parse can't be masked,
+                    // so refuse rather than forward secrets to the provider unmasked.
+                    tracing::warn!(error = %e, route = %label,
+                        "rejecting request: JSON body did not parse (enforce mode)");
+                    return Ok(text_response(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "scrub: request body is not valid JSON; refusing to forward unmasked"
+                            .to_string(),
+                    ));
+                }
             }
         }
     } else {

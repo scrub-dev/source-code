@@ -1,17 +1,21 @@
 //! The sentinel grammar (DESIGN §2).
 //!
 //! ```text
-//! sentinel := PREFIX [ ":" TYPE ] SEP ID SUFFIX
+//! sentinel := PREFIX [ ":" TYPE ] SEP ID SEP TAG SUFFIX
 //! PREFIX   := "⟦S"
 //! SUFFIX   := "⟧"
 //! SEP      := "·"
 //! TYPE     := [A-Z]+
 //! ID       := base62(u32)        // index into the request reverse table
+//! TAG      := base62(u32)        // keyed MAC over ID (authenticates the sentinel)
 //! ```
 //!
 //! The prefix is rare and self-delimiting, so the return-path scan is a single
 //! `memmem` for `PREFIX` followed by a bounded parse to `SUFFIX`. The id is an
-//! *index*, never the data — the secret stays in SCRUB's memory.
+//! *index*, never the data — the secret stays in SCRUB's memory. The **tag** is a
+//! per-vault keyed MAC of the id: a sentinel only rehydrates if its tag matches,
+//! so a hostile/compromised upstream cannot forge `⟦S·0⟧`, `⟦S·1⟧`, … to read
+//! arbitrary vault entries (DESIGN §2, §7).
 
 /// Visible prefix that opens every sentinel. Chosen to be rare in real payloads.
 pub const PREFIX: &str = "⟦S";
@@ -30,8 +34,9 @@ pub const MAX_SENTINEL_LEN: usize = 64;
 
 const BASE62: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-/// Append `⟦S[:TYPE]·ID⟧` to `out` for the given reverse-table index.
-pub fn encode(out: &mut Vec<u8>, ty: Option<&str>, id: u32) {
+/// Append `⟦S[:TYPE]·ID·TAG⟧` to `out` for the given reverse-table index and its
+/// keyed MAC tag.
+pub fn encode(out: &mut Vec<u8>, ty: Option<&str>, id: u32, tag: u32) {
     out.extend_from_slice(PREFIX.as_bytes());
     if let Some(t) = ty {
         out.extend_from_slice(TYPE_SEP.as_bytes());
@@ -39,6 +44,8 @@ pub fn encode(out: &mut Vec<u8>, ty: Option<&str>, id: u32) {
     }
     out.extend_from_slice(SEP.as_bytes());
     encode_base62(out, id);
+    out.extend_from_slice(SEP.as_bytes());
+    encode_base62(out, tag);
     out.extend_from_slice(SUFFIX.as_bytes());
 }
 
@@ -76,21 +83,26 @@ pub fn decode_base62(bytes: &[u8]) -> Option<u32> {
 }
 
 /// Given a slice that begins exactly at `PREFIX`, try to parse one complete
-/// sentinel. Returns `(id, total_byte_len)` on success.
+/// sentinel. Returns `(id, tag, total_byte_len)` on success.
 ///
 /// `None` means: not enough bytes yet, no terminator within `MAX_SENTINEL_LEN`,
-/// or a malformed body. Callers distinguish "incomplete, wait for more" from
-/// "malformed, emit literally" using whether `buf` already holds the bound.
-pub fn parse(buf: &[u8]) -> Option<(u32, usize)> {
+/// or a malformed body (including an old, tag-less sentinel). Callers distinguish
+/// "incomplete, wait for more" from "malformed, emit literally" using whether
+/// `buf` already holds the bound. The caller must still verify `tag` against the
+/// vault before trusting `id`.
+pub fn parse(buf: &[u8]) -> Option<(u32, u32, usize)> {
     debug_assert!(buf.starts_with(PREFIX.as_bytes()));
     let window = &buf[..buf.len().min(MAX_SENTINEL_LEN)];
     let suffix_at = memchr::memmem::find(window, SUFFIX.as_bytes())?;
     let body = &buf[PREFIX.len()..suffix_at];
-    // The id is whatever follows the last SEP (type, if present, has no SEP).
-    let sep_at = memchr::memmem::rfind(body, SEP.as_bytes())?;
-    let id_bytes = &body[sep_at + SEP.len()..];
-    let id = decode_base62(id_bytes)?;
-    Some((id, suffix_at + SUFFIX.len()))
+    // Body is `[:TYPE]·ID·TAG`: the tag follows the last SEP, the id the one
+    // before it (the type, if present, has no SEP).
+    let tag_sep = memchr::memmem::rfind(body, SEP.as_bytes())?;
+    let tag = decode_base62(&body[tag_sep + SEP.len()..])?;
+    let before = &body[..tag_sep];
+    let id_sep = memchr::memmem::rfind(before, SEP.as_bytes())?;
+    let id = decode_base62(&before[id_sep + SEP.len()..])?;
+    Some((id, tag, suffix_at + SUFFIX.len()))
 }
 
 /// Length of the longest suffix of `buf` that is a proper prefix of `PREFIX`.
@@ -123,28 +135,37 @@ mod tests {
     #[test]
     fn encode_parse_roundtrips() {
         let mut b = Vec::new();
-        encode(&mut b, Some("EMAIL"), 0x7f3a);
+        encode(&mut b, Some("EMAIL"), 0x7f3a, 0xdead);
         assert!(b.starts_with(PREFIX.as_bytes()));
-        let (id, len) = parse(&b).unwrap();
+        let (id, tag, len) = parse(&b).unwrap();
         assert_eq!(id, 0x7f3a);
+        assert_eq!(tag, 0xdead);
         assert_eq!(len, b.len());
     }
 
     #[test]
     fn parse_untyped() {
         let mut b = Vec::new();
-        encode(&mut b, None, 42);
-        let (id, len) = parse(&b).unwrap();
+        encode(&mut b, None, 42, 99);
+        let (id, tag, len) = parse(&b).unwrap();
         assert_eq!(id, 42);
+        assert_eq!(tag, 99);
         assert_eq!(len, b.len());
     }
 
     #[test]
     fn parse_incomplete_is_none() {
         let mut b = Vec::new();
-        encode(&mut b, Some("EMAIL"), 7);
+        encode(&mut b, Some("EMAIL"), 7, 7);
         b.truncate(b.len() - SUFFIX.len()); // drop terminator
         assert!(parse(&b).is_none());
+    }
+
+    #[test]
+    fn old_tagless_sentinel_does_not_parse() {
+        // A pre-tag sentinel `⟦S·7⟧` has only one SEP → rejected (emitted verbatim).
+        let s = format!("{PREFIX}{SEP}7{SUFFIX}");
+        assert!(parse(s.as_bytes()).is_none());
     }
 
     #[test]

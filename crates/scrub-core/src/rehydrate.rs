@@ -94,10 +94,12 @@ impl Rehydrator {
             out.extend_from_slice(&buf[i..p]); // literal bytes before the prefix
 
             match sentinel::parse(&buf[p..]) {
-                Some((id, len)) => {
-                    match store.resolve(id) {
+                Some((id, tag, len)) => {
+                    match store.resolve(id, tag) {
+                        // Only a sentinel with a valid tag resolves; a forged/echoed
+                        // or unknown one is emitted verbatim (never guessed).
                         Some(original) => emit_original(out, &original, self.encoding),
-                        None => out.extend_from_slice(&buf[p..p + len]), // unknown id -> verbatim
+                        None => out.extend_from_slice(&buf[p..p + len]),
                     }
                     i = p + len;
                 }
@@ -251,7 +253,7 @@ rules:
         let v = Vault::new();
         let id = v.intern(b"a\"b\\c\nd", Some("SECRET"));
         let mut masked = Vec::new();
-        sentinel::encode(&mut masked, Some("SECRET"), id);
+        sentinel::encode(&mut masked, Some("SECRET"), id, v.tag(id));
         // Splice the sentinel inside a JSON content string, as a model would echo it.
         let frame = format!(r#"{{"content":"{}"}}"#, String::from_utf8(masked).unwrap());
 

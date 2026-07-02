@@ -98,7 +98,7 @@ rules:
 
     // Request 1 (session A): first email gets id 0.
     post(proxy, "A", "ping alice@x.com").await;
-    assert!(seen.lock().unwrap().contains("⟦S:EMAIL·0⟧"));
+    assert!(seen.lock().unwrap().contains("⟦S:EMAIL·0·"));
 
     // Request 2 (session A): a NEW email appears first in the text, the OLD one
     // second. With a shared session vault the old email keeps id 0 and the new
@@ -106,8 +106,8 @@ rules:
     // id 0 instead.
     let resp2 = post(proxy, "A", "new bob@y.com old alice@x.com").await;
     let masked2 = seen.lock().unwrap().clone();
-    assert!(masked2.contains("new ⟦S:EMAIL·1⟧"), "masked: {masked2}");
-    assert!(masked2.contains("old ⟦S:EMAIL·0⟧"), "masked: {masked2}");
+    assert!(masked2.contains("new ⟦S:EMAIL·1·"), "masked: {masked2}");
+    assert!(masked2.contains("old ⟦S:EMAIL·0·"), "masked: {masked2}");
 
     // Response rehydrates through the shared session vault.
     let parsed: serde_json::Value = serde_json::from_str(&resp2).unwrap();
@@ -116,5 +116,5 @@ rules:
     // Request 3 (session B): isolated vault — alice is id 0 here, proving B does
     // not see A's mapping.
     post(proxy, "B", "only alice@x.com").await;
-    assert!(seen.lock().unwrap().contains("only ⟦S:EMAIL·0⟧"));
+    assert!(seen.lock().unwrap().contains("only ⟦S:EMAIL·0·"));
 }

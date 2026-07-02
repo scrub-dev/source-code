@@ -55,8 +55,7 @@ pub fn process_json_paths(
 ) -> DetectionReport {
     let mut report = DetectionReport::default();
     for path in paths {
-        let segments: Vec<&str> = path.split('.').collect();
-        walk(value, &segments, &mut |s: &mut String| {
+        let mut visit = |s: &mut String| {
             let spans = detector.find_spans(s.as_bytes());
             if spans.is_empty() {
                 return;
@@ -69,7 +68,15 @@ pub fn process_json_paths(
                 // apply_spans only inserts valid UTF-8 sentinels around UTF-8 input.
                 *s = String::from_utf8(masked).expect("masked output is valid UTF-8");
             }
-        });
+        };
+        // `**` scans every string leaf (comprehensive, opt-in); else follow the
+        // configured path.
+        if path == "**" {
+            walk_all(value, &mut visit);
+        } else {
+            let segments: Vec<&str> = path.split('.').collect();
+            walk(value, &segments, &mut visit);
+        }
     }
     report
 }
@@ -100,17 +107,42 @@ pub fn rehydrate_json_paths(
     store: &dyn MappingStore,
 ) {
     for path in paths {
-        let segments: Vec<&str> = path.split('.').collect();
-        walk_keyed(
-            value,
-            &segments,
-            String::new(),
-            &mut |key: &str, s: &mut String| {
-                let re = rehydrators.entry(key.to_string()).or_default();
-                let out = re.push(s.as_bytes(), store);
-                *s = String::from_utf8_lossy(&out).into_owned();
-            },
-        );
+        let mut visit = |key: &str, s: &mut String| {
+            let re = rehydrators.entry(key.to_string()).or_default();
+            let out = re.push(s.as_bytes(), store);
+            *s = String::from_utf8_lossy(&out).into_owned();
+        };
+        if path == "**" {
+            walk_all_keyed(value, String::new(), &mut visit);
+        } else {
+            let segments: Vec<&str> = path.split('.').collect();
+            walk_keyed(value, &segments, String::new(), &mut visit);
+        }
+    }
+}
+
+/// Visit every string leaf anywhere in `v` (used by the `**` scan-all path).
+fn walk_all(v: &mut Value, f: &mut dyn FnMut(&mut String)) {
+    match v {
+        Value::String(s) => f(s),
+        Value::Array(items) => items.iter_mut().for_each(|i| walk_all(i, f)),
+        Value::Object(map) => map.iter_mut().for_each(|(_, val)| walk_all(val, f)),
+        _ => {}
+    }
+}
+
+/// Like [`walk_all`] but threads a concrete-path key for per-leaf state.
+fn walk_all_keyed(v: &mut Value, key: String, f: &mut dyn FnMut(&str, &mut String)) {
+    match v {
+        Value::String(s) => f(&key, s),
+        Value::Array(items) => items
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, item)| walk_all_keyed(item, format!("{key}[{i}]"), f)),
+        Value::Object(map) => map
+            .iter_mut()
+            .for_each(|(k, val)| walk_all_keyed(val, format!("{key}.{k}"), f)),
+        _ => {}
     }
 }
 
@@ -196,7 +228,7 @@ rules:
         let v = Vault::new();
         let id = v.intern(b"john@acme.com", Some("EMAIL"));
         let mut s = Vec::new();
-        crate::sentinel::encode(&mut s, Some("EMAIL"), id);
+        crate::sentinel::encode(&mut s, Some("EMAIL"), id, v.tag(id));
         let sent = String::from_utf8(s).unwrap();
         // Split inside the (ASCII) type name — a char boundary, mid-sentinel.
         let at = sent.find("EMAIL").unwrap() + 2;
@@ -229,6 +261,28 @@ rules:
             "choice 0 sentinel must rehydrate cleanly"
         );
         assert_eq!(c1, "XY", "choice 1 must be free of choice 0's carry");
+    }
+
+    #[test]
+    fn scan_all_wildcard_masks_every_string_leaf() {
+        let det = detector();
+        let v = Vault::new();
+        let mut body: Value = serde_json::from_str(
+            r#"{"a":"x a@b.com","nested":{"b":"c@d.com"},"arr":["e@f.com"],"model":"gpt"}"#,
+        )
+        .unwrap();
+        let n = mask_json_paths(
+            &mut body,
+            &["**".to_string()],
+            &det,
+            &v,
+            MaskStyle::TypedSentinel,
+        );
+        assert_eq!(n, 3, "every email leaf, anywhere in the doc");
+        assert!(body["a"].as_str().unwrap().contains("⟦S:EMAIL·"));
+        assert!(body["nested"]["b"].as_str().unwrap().contains("⟦S:EMAIL·"));
+        assert!(body["arr"][0].as_str().unwrap().contains("⟦S:EMAIL·"));
+        assert_eq!(body["model"], "gpt"); // no secret -> untouched
     }
 
     #[test]

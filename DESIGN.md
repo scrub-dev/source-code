@@ -59,26 +59,30 @@ Default to a **deterministic sentinel** the model treats as an opaque identifier
 to pass through unchanged:
 
 ```
-⟦S·7f3a⟧            bare      (generic)
-⟦S:EMAIL·7f3a⟧      typed     (type hint keeps model output coherent)
+⟦S·7f3a·9x2⟧            bare      (generic)
+⟦S:EMAIL·7f3a·9x2⟧      typed     (type hint keeps model output coherent)
 ```
 
 Grammar (fixed, self-delimiting):
 
 ```
-sentinel  := PREFIX [ ":" TYPE ] "·" ID SUFFIX
+sentinel  := PREFIX [ ":" TYPE ] "·" ID "·" TAG SUFFIX
 PREFIX    := "⟦S"
 SUFFIX    := "⟧"
 TYPE      := [A-Z]+                  // EMAIL, SECRET, CODENAME, ...
-ID        := base62{ID_LEN}         // fixed width → cheap parse
+ID        := base62(u32)            // index into the reverse table
+TAG       := base62(u32)            // keyed MAC of ID (authenticates the sentinel)
 ```
 
 Design properties:
 - **Rare, self-delimiting prefix** → return-path scan is a single `memchr` for `⟦S`
-  followed by a fixed-width parse. No per-request automaton to rebuild.
+  followed by a bounded parse. No per-request automaton to rebuild.
 - **The id is an index, not the data.** `7f3a` indexes a request-local reverse table.
   The secret never leaves SCRUB's memory. This *is* the compliance guarantee.
-- **Deterministic per scope.** A forward map `hash(original) → id` collapses repeated
+- **Authenticated.** The tag is a per-vault keyed MAC (truncated HMAC-SHA256) of the id.
+  Rehydration resolves an id only if its tag matches, so a hostile/compromised upstream
+  cannot forge or blindly enumerate sentinels (`⟦S·0⟧`, `⟦S·1⟧`, …) to read the vault.
+- **Deterministic per scope.** A forward map `original → id` collapses repeated
   occurrences to the same id, so the model sees consistency and we dedupe for free.
 - **Typed variant** is the quality knob: bare sentinels can make models hallucinate
   around "missing" context; a type hint mitigates it while staying trivially reversible.
@@ -99,7 +103,7 @@ EGRESS (request)
   for each span (priority, then longest-match-wins):
     id = forward_map.get_or_insert(hash(span))
     reverse[id] = span                     // request- or session-scoped
-    emit ⟦S:TYPE·id⟧ in place of span
+    emit ⟦S:TYPE·id·tag⟧ in place of span
   forward scrubbed body upstream (vectored write of [slice|sentinel|slice|...])
 
 INGRESS (response, possibly SSE stream)
@@ -233,7 +237,7 @@ in v0 is throwaway.
 flowchart TD
     C(["Client"]) -->|request| L["Listener — HTTP/1.1, H2, SSE"]
     L --> D["Detection pipeline · egress<br/>Aho-Corasick ‖ RegexSet ‖ entropy — single pass, merged spans"]
-    D -->|spans| V["Vaultizer + Mapping<br/>span → ⟦S:TYPE·id⟧ · in-mem, Redis opt-in for cluster"]
+    D -->|spans| V["Vaultizer + Mapping<br/>span → ⟦S:TYPE·id·tag⟧ · in-mem, Redis opt-in for cluster"]
     V -->|scrubbed body| U[["Upstream provider"]]
     U -->|"response · often SSE"| R["Rehydration state-machine · ingress<br/>memchr scan · reverse lookup · bounded-tail buffering"]
     R -->|rehydrated| C

@@ -12,23 +12,49 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 /// Forward (mask) and reverse (rehydrate) mapping for sentinel ids.
 ///
-/// Implementors must guarantee: `resolve(intern(x)) == Some(x)` within a scope,
-/// and that interning equal originals yields the same id (determinism + dedup).
+/// Implementors must guarantee: `resolve(intern(x), tag(intern(x))) == Some(x)`
+/// within a scope, and that interning equal originals yields the same id
+/// (determinism + dedup).
 pub trait MappingStore: Send + Sync {
     /// Record `original` (optionally typed) and return its stable id.
     fn intern(&self, original: &[u8], ty: Option<&str>) -> u32;
-    /// Resolve an id back to its original bytes, or `None` if unknown.
-    fn resolve(&self, id: u32) -> Option<Vec<u8>>;
+    /// The keyed MAC tag for `id`, embedded in the sentinel. Only sentinels this
+    /// store issued (matching tag) will rehydrate, so a hostile upstream cannot
+    /// forge one to read an arbitrary entry.
+    fn tag(&self, id: u32) -> u32;
+    /// Resolve `id` to its original bytes, but only if `tag` authenticates it
+    /// (else `None` — the sentinel is emitted verbatim).
+    fn resolve(&self, id: u32, tag: u32) -> Option<Vec<u8>>;
     /// Number of distinct originals held.
     fn len(&self) -> usize;
     /// True when no originals are held.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+}
+
+/// Keyed MAC (truncated HMAC-SHA256) of an id under `key`. 32 bits is ample: an
+/// attacker gets no oracle, and each forgery attempt costs a full model round
+/// trip, so 2^32 is far out of reach.
+fn mac(key: &[u8; 32], id: u32) -> u32 {
+    let mut m = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("hmac accepts any key length");
+    m.update(&id.to_le_bytes());
+    let out = m.finalize().into_bytes();
+    u32::from_le_bytes([out[0], out[1], out[2], out[3]])
+}
+
+/// A fresh random tag key from the system RNG.
+fn random_key() -> [u8; 32] {
+    let mut k = [0u8; 32];
+    getrandom::getrandom(&mut k).expect("system RNG");
+    k
 }
 
 #[derive(Default)]
@@ -80,6 +106,10 @@ impl Default for IdSpace {
 pub struct Vault {
     inner: Mutex<Inner>,
     space: IdSpace,
+    /// Secret key that authenticates this vault's sentinels (see [`mac`]). Random
+    /// per request/registry vault; for cross-node session vaults it is derived so
+    /// every node agrees (see `from_entries_in_keyed`).
+    tag_key: [u8; 32],
 }
 
 /// Back-compat alias: the request-scoped use of a [`Vault`].
@@ -96,7 +126,8 @@ impl Vault {
         Self::default()
     }
 
-    /// A vault that allocates ids from `space` (node-disjoint cross-node ids).
+    /// A vault that allocates ids from `space` (node-disjoint cross-node ids),
+    /// with a fresh random tag key.
     pub fn with_id_space(space: IdSpace) -> Self {
         Self {
             inner: Mutex::new(Inner {
@@ -105,6 +136,7 @@ impl Vault {
                 reverse: HashMap::new(),
             }),
             space,
+            tag_key: random_key(),
         }
     }
 
@@ -114,9 +146,19 @@ impl Vault {
     }
 
     /// Like [`from_entries`](Self::from_entries) but allocating new ids from
-    /// `space`. Existing entries from *all* spaces are kept for dedup/rehydrate;
-    /// the next id only advances past this space's own existing ids.
+    /// `space` (fresh random tag key).
     pub fn from_entries_in(entries: Vec<(u32, Vec<u8>)>, space: IdSpace) -> Self {
+        Self::from_entries_in_keyed(entries, space, random_key())
+    }
+
+    /// Like [`from_entries_in`](Self::from_entries_in) but with an explicit
+    /// `tag_key`. Cross-node session backends derive a stable key per session so a
+    /// sentinel minted on one node authenticates on another.
+    pub fn from_entries_in_keyed(
+        entries: Vec<(u32, Vec<u8>)>,
+        space: IdSpace,
+        tag_key: [u8; 32],
+    ) -> Self {
         let mut inner = Inner {
             next: space.base,
             forward: HashMap::new(),
@@ -132,6 +174,7 @@ impl Vault {
         Self {
             inner: Mutex::new(inner),
             space,
+            tag_key,
         }
     }
 
@@ -183,8 +226,17 @@ impl MappingStore for Vault {
         id
     }
 
-    fn resolve(&self, id: u32) -> Option<Vec<u8>> {
+    fn tag(&self, id: u32) -> u32 {
+        mac(&self.tag_key, id)
+    }
+
+    fn resolve(&self, id: u32, tag: u32) -> Option<Vec<u8>> {
         if id == OVERFLOW_ID {
+            return None;
+        }
+        // Authenticate the sentinel: reject a forged/echoed one whose tag we did
+        // not issue for this id (constant-time compare).
+        if !bool::from(mac(&self.tag_key, id).ct_eq(&tag)) {
             return None;
         }
         self.inner.lock().unwrap().reverse.get(&id).cloned()
@@ -207,6 +259,7 @@ impl Drop for Vault {
                 k.zeroize();
             }
         }
+        self.tag_key.zeroize();
     }
 }
 
@@ -239,7 +292,29 @@ mod tests {
         assert_eq!(v.intern(b"secret-1", None), v.intern(b"secret-1", None));
         // Each id resolves back to its own original.
         let id7 = v.intern(b"secret-7", None);
-        assert_eq!(v.resolve(id7).as_deref(), Some(&b"secret-7"[..]));
+        assert_eq!(
+            v.resolve(id7, v.tag(id7)).as_deref(),
+            Some(&b"secret-7"[..])
+        );
+    }
+
+    #[test]
+    fn resolve_rejects_a_forged_or_wrong_tag() {
+        // A sentinel with a guessed id but a tag we did not issue never resolves —
+        // this is what stops a hostile upstream from echoing ⟦S·0⟧ to read the vault.
+        let v = Vault::new();
+        let id = v.intern(b"alice@corp.com", Some("EMAIL"));
+        let good = v.tag(id);
+        assert_eq!(v.resolve(id, good).as_deref(), Some(&b"alice@corp.com"[..]));
+        assert_eq!(
+            v.resolve(id, good.wrapping_add(1)),
+            None,
+            "wrong tag rejected"
+        );
+        assert_eq!(v.resolve(id, 0), None, "zero/absent tag rejected");
+        // A different vault's key yields a different tag for the same id.
+        let v2 = Vault::new();
+        assert_ne!(v.tag(id), v2.tag(id), "tags are vault-specific (keyed)");
     }
 
     #[test]
@@ -256,17 +331,17 @@ mod tests {
         assert!(of < 13 || of == u32::MAX); // never in [13, ..) node B's space
         assert_eq!(a.intern(b"another", None), u32::MAX);
         // Overflow ids are masked but never rehydrate (fail-safe).
-        assert_eq!(a.resolve(u32::MAX), None);
+        assert_eq!(a.resolve(u32::MAX, 0), None);
         // Already-mapped originals still resolve correctly.
-        assert_eq!(a.resolve(11).as_deref(), Some(&b"y"[..]));
+        assert_eq!(a.resolve(11, a.tag(11)).as_deref(), Some(&b"y"[..]));
     }
 
     #[test]
     fn resolve_roundtrips() {
         let v = Vault::new();
         let id = v.intern(b"secret", None);
-        assert_eq!(v.resolve(id), Some(b"secret".to_vec()));
-        assert_eq!(v.resolve(999), None);
+        assert_eq!(v.resolve(id, v.tag(id)), Some(b"secret".to_vec()));
+        assert_eq!(v.resolve(999, v.tag(999)), None);
     }
 
     #[test]
@@ -305,7 +380,10 @@ mod tests {
         let restored = Vault::from_entries(v.entries());
         // existing originals keep their ids (dedup map rebuilt)
         assert_eq!(restored.intern(b"alice@x.com", Some("EMAIL")), a);
-        assert_eq!(restored.resolve(b), Some(b"bob@y.com".to_vec()));
+        assert_eq!(
+            restored.resolve(b, restored.tag(b)),
+            Some(b"bob@y.com".to_vec())
+        );
         // a new original gets a fresh, non-colliding id
         let c = restored.intern(b"carol@z.com", Some("EMAIL"));
         assert!(c != a && c != b);

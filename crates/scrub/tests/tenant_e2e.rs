@@ -141,7 +141,7 @@ tenants:
     post(proxy, "b-key", Some("S"), "fresh bob@y.com").await;
     let b = seen.lock().unwrap().clone();
     assert!(
-        b.contains("⟦S:EMAIL·0⟧"),
+        b.contains("⟦S:EMAIL·0·"),
         "tenant B not isolated from A: {b}"
     );
 }

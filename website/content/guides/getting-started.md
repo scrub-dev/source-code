@@ -59,7 +59,7 @@ sequenceDiagram
     participant S as SCRUB
     participant P as LLM provider
     App->>S: request (contains secrets / PII)
-    Note over S: detect → mask ⟦S:TYPE·id⟧
+    Note over S: detect → mask ⟦S:TYPE·id·tag⟧
     S->>P: masked request
     P-->>S: streamed response (placeholders)
     Note over S: rehydrate originals

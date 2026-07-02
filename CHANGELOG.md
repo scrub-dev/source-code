@@ -7,6 +7,18 @@ All notable changes to SCRUB are documented here. The format follows
 ## [Unreleased]
 
 ### Security
+- **Authenticated sentinels** — every sentinel now carries a per-vault keyed MAC
+  tag (`⟦S:TYPE·id·tag⟧`, HMAC-SHA256). Rehydration resolves an id only if its tag
+  matches, so a hostile/compromised upstream can no longer forge or blindly
+  enumerate sentinels (`⟦S·0⟧`, `⟦S·1⟧`, …) to read a session vault. Cross-node
+  session tag keys derive from `sessions.encryption_key` (set it on clusters).
+- **Enforce mode fails closed on unparseable JSON** — a JSON-typed request body
+  that doesn't parse is rejected (422) instead of forwarded unmasked.
+- **Opt-in comprehensive scanning** — `scan_paths: ["**"]` (and `stream_paths`)
+  scans/rehydrates *every* string leaf, for deployments that want maximum coverage
+  over provider-aware minimalism.
+
+### Security (earlier in this pre-release)
 - **Upstream redirects are no longer followed** (proxy, interception, and Vault
   clients). Prevents SSRF to internal/metadata endpoints and stops a malicious
   upstream from getting a rehydrated (secret-bearing) response via a redirect; the

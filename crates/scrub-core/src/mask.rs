@@ -8,10 +8,10 @@ use crate::vault::MappingStore;
 /// How sentinels carry type information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MaskStyle {
-    /// `⟦S:EMAIL·id⟧` — type hint keeps model output coherent.
+    /// `⟦S:EMAIL·id·tag⟧` — type hint keeps model output coherent.
     #[default]
     TypedSentinel,
-    /// `⟦S·id⟧` — no type leaked to the model.
+    /// `⟦S·id·tag⟧` — no type leaked to the model.
     BareSentinel,
 }
 
@@ -50,7 +50,7 @@ pub(crate) fn apply_spans(
             MaskStyle::TypedSentinel => span.ty.as_deref(),
             MaskStyle::BareSentinel => None,
         };
-        sentinel::encode(&mut out, ty, id);
+        sentinel::encode(&mut out, ty, id, store.tag(id));
         cursor = span.end;
     }
     out.extend_from_slice(&input[cursor..]);

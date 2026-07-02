@@ -77,29 +77,29 @@ async fn session_continues_across_nodes() {
     let kv = Arc::new(InMemoryKv::default());
     let node_a = node(
         upstream,
-        KvSessionBackend::new(kv.clone(), Duration::from_secs(60), 0),
+        KvSessionBackend::new(kv.clone(), Duration::from_secs(60), 0, [9u8; 32]),
     )
     .await;
     let node_b = node(
         upstream,
-        KvSessionBackend::new(kv.clone(), Duration::from_secs(60), 1),
+        KvSessionBackend::new(kv.clone(), Duration::from_secs(60), 1, [9u8; 32]),
     )
     .await;
 
     // Node A interns alice (id 0) under session "S" and commits to the store.
     post(node_a, "S", "first alice@x.com").await;
-    assert!(seen.lock().unwrap().contains("first ⟦S:EMAIL·0⟧"));
+    assert!(seen.lock().unwrap().contains("first ⟦S:EMAIL·0·"));
 
     // Node B loads the session: alice keeps id 0 (cross-node dedup); bob gets a
     // fresh id from node B's own space (not 0, and not colliding with A).
     post(node_b, "S", "old alice@x.com new bob@y.com").await;
     let masked = seen.lock().unwrap().clone();
     assert!(
-        masked.contains("old ⟦S:EMAIL·0⟧"),
+        masked.contains("old ⟦S:EMAIL·0·"),
         "alice id not shared across nodes: {masked}"
     );
     assert!(
-        masked.contains("new ⟦S:EMAIL·") && !masked.contains("new ⟦S:EMAIL·0⟧"),
+        masked.contains("new ⟦S:EMAIL·") && !masked.contains("new ⟦S:EMAIL·0·"),
         "bob should get a distinct node-B id: {masked}"
     );
 }
@@ -119,12 +119,12 @@ async fn session_continues_across_nodes_redis() {
     let kv = scrub::redis_backend::RedisKv::connect(&url).await.unwrap();
     let node_a = node(
         upstream,
-        KvSessionBackend::new(kv.clone(), Duration::from_secs(60), 0),
+        KvSessionBackend::new(kv.clone(), Duration::from_secs(60), 0, [9u8; 32]),
     )
     .await;
     let node_b = node(
         upstream,
-        KvSessionBackend::new(kv, Duration::from_secs(60), 1),
+        KvSessionBackend::new(kv, Duration::from_secs(60), 1, [9u8; 32]),
     )
     .await;
 
@@ -133,9 +133,9 @@ async fn session_continues_across_nodes_redis() {
     post(node_a, &sid, "first alice@x.com").await;
     post(node_b, &sid, "old alice@x.com new bob@y.com").await;
     let masked = seen.lock().unwrap().clone();
-    assert!(masked.contains("old ⟦S:EMAIL·0⟧"), "redis: {masked}");
+    assert!(masked.contains("old ⟦S:EMAIL·0·"), "redis: {masked}");
     assert!(
-        masked.contains("new ⟦S:EMAIL·") && !masked.contains("new ⟦S:EMAIL·0⟧"),
+        masked.contains("new ⟦S:EMAIL·") && !masked.contains("new ⟦S:EMAIL·0·"),
         "redis: {masked}"
     );
 }

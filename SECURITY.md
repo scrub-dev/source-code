@@ -34,17 +34,19 @@ broker). Run it inside your trust boundary, on hosts and networks you control,
 with least-privilege access. Anyone who can read SCRUB's memory, its config, its
 secret sources, or (for the Redis backend) the session store can see secrets.
 
-**Session keys are bearer secrets.** With `scope: session`, everyone who presents
-the same session-header value shares one reverse-mapping vault, and — by the
-reversibility contract — anyone who can get the upstream to emit a sentinel (e.g.
-by asking the model to echo `⟦S:TYPE·id⟧`) has that id rehydrated back to its
-original. Rehydration resolves on the id alone (ids are small integers; the type
-label is not authenticated), so a compromised/hostile upstream can enumerate a
-session vault by echoing `⟦S·0⟧`, `⟦S·1⟧`, … A shared session vault is therefore
-fully readable by anyone holding the session key **and** by a hostile upstream.
-Use **one session per user/trust-unit**, make session keys **unguessable**, keep
-the upstream trusted, and don't mix different users' secrets under one session
-key. (Request scope confines this to the caller's own current request.)
+**Sentinels are authenticated; session keys are still bearer secrets.** Every
+sentinel carries a per-vault keyed MAC tag (`⟦S:TYPE·id·tag⟧`), so a hostile or
+compromised upstream **cannot forge or blindly enumerate** sentinels (`⟦S·0⟧`,
+`⟦S·1⟧`, …) to read the vault — only sentinels SCRUB actually issued rehydrate.
+What remains inherent to reversibility: with `scope: session`, everyone presenting
+the same session-header value shares one vault, and an upstream that *received* a
+sentinel earlier in the session can replay it — which re-reveals that value to the
+session owner (not to the upstream). So still use **one session per
+user/trust-unit**, make session keys **unguessable**, and don't mix different
+users' secrets under one session key. (Request scope confines everything to the
+caller's own current request.) For cross-node sessions the tag key is derived from
+`sessions.encryption_key`, so set it — otherwise nodes can't agree on tags and a
+session's sentinels won't rehydrate on another node.
 
 ### Sensitive material and how it is handled
 - **In-memory vaults** (request/session mappings) are zeroized on drop; session
@@ -95,11 +97,12 @@ key. (Request scope confines this to the caller's own current request.)
 - Rotate auth keys and the interception CA on a schedule.
 
 ### Known limitations (as of 1.0)
-- **Masking covers configured JSON content paths.** A request whose body is not
-  JSON (by content-type), does not parse as JSON, or carries secrets outside the
-  configured `scan_paths` is forwarded **unmasked**. SCRUB prevents leakage in
-  well-formed provider requests; it is not a DLP control against a client
-  *deliberately* exfiltrating over an unscanned channel.
+- **Masking covers configured JSON content paths.** In enforce mode a JSON-typed
+  body that does not parse is **rejected (422)** rather than forwarded, and a
+  profile can set `scan_paths: ["**"]` to scan *every* string leaf. Still, a body
+  sent with a non-JSON content type, or a secret no rule matches, passes through:
+  SCRUB prevents leakage in well-formed provider requests; it is not a DLP control
+  against a client *deliberately* exfiltrating over an unscanned channel.
 - The at-rest `encryption_key` is derived via SHA-256, not a password-stretching
   KDF — use a **high-entropy** key (it is a shared cluster secret, not a password).
 - The audit hash-chain detects edits and mid-file deletions, but truncation of the

@@ -90,16 +90,26 @@ pub struct KvSessionBackend {
     ttl: Duration,
     cipher: Option<Cipher>,
     space: IdSpace,
+    /// Secret from which each session's sentinel tag key is derived. Must be the
+    /// same on every node so a sentinel minted on one node authenticates on
+    /// another (derive it from `sessions.encryption_key`).
+    tag_secret: [u8; 32],
 }
 
 impl KvSessionBackend {
     /// Plaintext backend for `node_id`.
-    pub fn new(kv: Arc<dyn KvStore>, ttl: Duration, node_id: u16) -> Arc<Self> {
+    pub fn new(
+        kv: Arc<dyn KvStore>,
+        ttl: Duration,
+        node_id: u16,
+        tag_secret: [u8; 32],
+    ) -> Arc<Self> {
         Arc::new(Self {
             kv,
             ttl,
             cipher: None,
             space: id_space_for_node(node_id),
+            tag_secret,
         })
     }
 
@@ -109,13 +119,25 @@ impl KvSessionBackend {
         ttl: Duration,
         cipher: Cipher,
         node_id: u16,
+        tag_secret: [u8; 32],
     ) -> Arc<Self> {
         Arc::new(Self {
             kv,
             ttl,
             cipher: Some(cipher),
             space: id_space_for_node(node_id),
+            tag_secret,
         })
+    }
+
+    /// Per-session sentinel tag key: HMAC(tag_secret, session_key). Stable across
+    /// acquires and nodes so tagged sentinels round-trip through a shared session.
+    fn session_tag_key(&self, session_key: &str) -> [u8; 32] {
+        use hmac::{Hmac, Mac};
+        let mut m = <Hmac<sha2::Sha256> as Mac>::new_from_slice(&self.tag_secret)
+            .expect("hmac accepts any key length");
+        m.update(session_key.as_bytes());
+        m.finalize().into_bytes().into()
     }
 }
 
@@ -136,7 +158,13 @@ impl SessionBackend for KvSessionBackend {
             };
             entries.push((id, original));
         }
-        Arc::new(Vault::from_entries_in(entries, self.space))
+        // Derive the per-session tag key so a sentinel minted here authenticates on
+        // any node serving the same session.
+        Arc::new(Vault::from_entries_in_keyed(
+            entries,
+            self.space,
+            self.session_tag_key(key),
+        ))
     }
 
     async fn commit(&self, key: &str, vault: &Vault) {
@@ -261,11 +289,13 @@ mod tests {
     use scrub_core::vault::MappingStore;
 
     const TTL: Duration = Duration::from_secs(60);
+    // Shared cluster secret so tags match across simulated nodes.
+    const TS: [u8; 32] = [7u8; 32];
 
     #[tokio::test]
     async fn kv_backend_load_modify_store() {
         let kv = Arc::new(InMemoryKv::default());
-        let backend = KvSessionBackend::new(kv.clone(), TTL, 0);
+        let backend = KvSessionBackend::new(kv.clone(), TTL, 0, TS);
 
         // Node 1: intern an original and commit.
         let v1 = backend.acquire("s").await;
@@ -273,9 +303,9 @@ mod tests {
         backend.commit("s", &v1).await;
 
         // Node 2 (fresh backend over the SAME kv): sees the committed entry.
-        let backend2 = KvSessionBackend::new(kv, TTL, 0);
+        let backend2 = KvSessionBackend::new(kv, TTL, 0, TS);
         let v2 = backend2.acquire("s").await;
-        assert_eq!(v2.resolve(id), Some(b"secret-value".to_vec()));
+        assert_eq!(v2.resolve(id, v2.tag(id)), Some(b"secret-value".to_vec()));
         // and dedups the same original to the same id
         assert_eq!(v2.intern(b"secret-value", Some("SECRET")), id);
     }
@@ -284,7 +314,7 @@ mod tests {
     async fn encrypted_backend_stores_ciphertext_and_roundtrips() {
         let kv = Arc::new(InMemoryKv::default());
         let cipher = crate::crypto::Cipher::from_passphrase("a-strong-shared-key");
-        let backend = KvSessionBackend::encrypted(kv.clone(), TTL, cipher, 0);
+        let backend = KvSessionBackend::encrypted(kv.clone(), TTL, cipher, 0, TS);
 
         let v = backend.acquire("s").await;
         let id = v.intern(b"top-secret-value", Some("SECRET"));
@@ -300,9 +330,12 @@ mod tests {
 
         // A second node with the SAME key rehydrates correctly.
         let cipher2 = crate::crypto::Cipher::from_passphrase("a-strong-shared-key");
-        let backend2 = KvSessionBackend::encrypted(kv, TTL, cipher2, 0);
+        let backend2 = KvSessionBackend::encrypted(kv, TTL, cipher2, 0, TS);
         let v2 = backend2.acquire("s").await;
-        assert_eq!(v2.resolve(id), Some(b"top-secret-value".to_vec()));
+        assert_eq!(
+            v2.resolve(id, v2.tag(id)),
+            Some(b"top-secret-value".to_vec())
+        );
     }
 
     /// The correctness fix: two nodes interning *different* originals from the
@@ -310,8 +343,8 @@ mod tests {
     #[tokio::test]
     async fn concurrent_nodes_dont_lose_or_collide() {
         let kv = Arc::new(InMemoryKv::default());
-        let node_a = KvSessionBackend::new(kv.clone(), TTL, 0);
-        let node_b = KvSessionBackend::new(kv.clone(), TTL, 1);
+        let node_a = KvSessionBackend::new(kv.clone(), TTL, 0, TS);
+        let node_b = KvSessionBackend::new(kv.clone(), TTL, 1, TS);
 
         // Both load the (empty) session before either commits.
         let va = node_a.acquire("s").await;
@@ -326,8 +359,8 @@ mod tests {
 
         // A later read sees BOTH originals (blob last-write-wins would lose one).
         let v = node_a.acquire("s").await;
-        assert_eq!(v.resolve(id_x), Some(b"secret-X".to_vec()));
-        assert_eq!(v.resolve(id_y), Some(b"secret-Y".to_vec()));
+        assert_eq!(v.resolve(id_x, v.tag(id_x)), Some(b"secret-X".to_vec()));
+        assert_eq!(v.resolve(id_y, v.tag(id_y)), Some(b"secret-Y".to_vec()));
     }
 
     #[test]
