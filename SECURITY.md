@@ -34,6 +34,14 @@ broker). Run it inside your trust boundary, on hosts and networks you control,
 with least-privilege access. Anyone who can read SCRUB's memory, its config, its
 secret sources, or (for the Redis backend) the session store can see secrets.
 
+**Session keys are bearer secrets.** With `scope: session`, everyone who presents
+the same session-header value shares one reverse-mapping vault, and — by the
+reversibility contract — anyone who can get the upstream to emit a sentinel (e.g.
+by asking the model to echo `⟦S:TYPE·id⟧`) has that id rehydrated back to its
+original. So a shared session vault is fully readable by anyone holding the
+session key. Use **one session per user/trust-unit**, make session keys
+**unguessable**, and don't mix different users' secrets under one session key.
+
 ### Sensitive material and how it is handled
 - **In-memory vaults** (request/session mappings) are zeroized on drop; session
   scope is bounded by TTL.

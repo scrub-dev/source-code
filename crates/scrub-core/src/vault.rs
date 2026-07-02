@@ -9,9 +9,7 @@
 //! returns *owned* bytes (a transient clone of the original we're about to emit
 //! anyway) rather than a borrow held across the lock.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 
 use zeroize::Zeroize;
@@ -36,8 +34,11 @@ pub trait MappingStore: Send + Sync {
 #[derive(Default)]
 struct Inner {
     next: u32,
-    /// content-hash(original) -> id, for dedup/determinism.
-    forward: HashMap<u64, u32>,
+    /// original bytes -> id, for dedup/determinism. Keyed by the *exact* original
+    /// (not a truncated hash), so two distinct secrets can never be conflated
+    /// into the same sentinel — a mis-rehydration would disclose one secret in
+    /// place of another in a shared session vault.
+    forward: HashMap<Vec<u8>, u32>,
     /// id -> original bytes.
     reverse: HashMap<u32, Vec<u8>>,
 }
@@ -117,9 +118,7 @@ impl Vault {
             reverse: HashMap::new(),
         };
         for (id, original) in entries {
-            let mut h = DefaultHasher::new();
-            original.hash(&mut h);
-            inner.forward.insert(h.finish(), id);
+            inner.forward.insert(original.clone(), id);
             if space.contains(id) {
                 inner.next = inner.next.max(id + 1);
             }
@@ -160,17 +159,13 @@ impl Vault {
 
 impl MappingStore for Vault {
     fn intern(&self, original: &[u8], _ty: Option<&str>) -> u32 {
-        let mut h = DefaultHasher::new();
-        original.hash(&mut h);
-        let key = h.finish();
-
         let mut inner = self.inner.lock().unwrap();
-        if let Some(&id) = inner.forward.get(&key) {
+        if let Some(&id) = inner.forward.get(original) {
             return id;
         }
         let id = inner.next;
         inner.next += 1;
-        inner.forward.insert(key, id);
+        inner.forward.insert(original.to_vec(), id);
         inner.reverse.insert(id, original.to_vec());
         id
     }
@@ -186,12 +181,15 @@ impl MappingStore for Vault {
 
 impl Drop for Vault {
     fn drop(&mut self) {
-        // Secure destruction (DESIGN §7): wipe originals; forget the hashes.
+        // Secure destruction (DESIGN §7): wipe every copy of the originals — both
+        // the reverse values and the forward keys now hold plaintext.
         if let Ok(mut inner) = self.inner.lock() {
             for v in inner.reverse.values_mut() {
                 v.zeroize();
             }
-            inner.forward.clear();
+            for (mut k, _) in inner.forward.drain() {
+                k.zeroize();
+            }
         }
     }
 }
@@ -209,6 +207,23 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert_eq!(v.len(), 2);
+    }
+
+    #[test]
+    fn distinct_originals_never_share_an_id() {
+        // Dedup is keyed by the exact bytes, so different secrets can never be
+        // conflated (which would mis-rehydrate one as the other).
+        let v = Vault::new();
+        let mut ids = std::collections::HashSet::new();
+        for i in 0..2000u32 {
+            let id = v.intern(format!("secret-{i}").as_bytes(), None);
+            assert!(ids.insert(id), "id {id} reused for a distinct original");
+        }
+        // Same original still dedups to the same id.
+        assert_eq!(v.intern(b"secret-1", None), v.intern(b"secret-1", None));
+        // Each id resolves back to its own original.
+        let id7 = v.intern(b"secret-7", None);
+        assert_eq!(v.resolve(id7).as_deref(), Some(&b"secret-7"[..]));
     }
 
     #[test]

@@ -23,6 +23,10 @@ All notable changes to SCRUB are documented here. The format follows
   transaction log can hold original content in dry-run mode.
 - **Proxy auth compares fixed-length SHA-256 digests** in constant time, removing a
   key-length timing side channel.
+- **Vault dedup is keyed by the exact original bytes**, not a truncated 64-bit
+  hash — two distinct secrets can no longer be conflated into one sentinel (which
+  would mis-rehydrate one secret as another in a shared session vault). All
+  plaintext copies (forward keys + reverse values) are zeroized on drop.
 
 ## [1.0.0] — 2026-06-28
 
